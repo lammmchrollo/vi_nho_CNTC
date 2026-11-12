@@ -4,13 +4,8 @@
 
 ## Chạy trên Windows
 
-1. Giải nén toàn bộ tệp ZIP. Mở thư mục Vi_Nho trong File Explorer.
-2. Trong thư mục chứa index.html, bấm vào thanh địa chỉ, gõ powershell rồi nhấn Enter.
-3. Chạy lệnh sau nếu máy có Python 3.
-
-   `py -m http.server 8000 --bind 127.0.0.1`
-
-4. Mở http://127.0.0.1:8000 trong Chrome hoặc Edge. Nhấn Ctrl+C trong terminal để dừng.
+1. npm i
+2. npm start
 
 Trên macOS hoặc Linux, dùng `python3 -m http.server 8000 --bind 127.0.0.1`. Nếu chỉ mở index.html trực tiếp, việc lưu dữ liệu có thể khác nhau giữa các trình duyệt. Bản web trực tuyến dành cho chủ sở hữu ở https://vi-nho-fintech.lovablegait.chatgpt.site.
 
