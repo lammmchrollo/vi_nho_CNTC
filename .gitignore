@@ -1,0 +1,17 @@
+node_modules/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+npm-debug.log*
+coverage/
+test-results/
+playwright-report/
+submission/
+.DS_Store

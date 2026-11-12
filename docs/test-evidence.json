@@ -1,0 +1,6 @@
+{
+  "command": "npm test",
+  "summary": "21 tests, 21 pass, 0 fail (12 model tests và 9 backend/API tests; gồm 8 subtests trong backend suite)",
+  "verified_at": "2026-11-12",
+  "note": "Node.js có thể in cảnh báo experimental cho node:sqlite; đây là cảnh báo runtime dự kiến trên Node 22, không phải test failure. Hãy cập nhật tệp này nếu test suite thay đổi rồi chạy lại scripts/export-documents.py."
+}

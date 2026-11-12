@@ -1,0 +1,136 @@
+:root {
+  --forest: #173f31;
+  --green: #2d6a4f;
+  --sage: #dfece2;
+  --paper: #fffef9;
+  --canvas: #e9eee8;
+  --ink: #17251d;
+  --muted: #56655c;
+  --line: #d7e0d8;
+  --amber: #c78535;
+  --sans: "Segoe UI", Arial, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { background: var(--canvas); color: var(--ink); font-family: var(--sans); }
+body { margin: 0; }
+a { color: var(--green); overflow-wrap: anywhere; }
+.document-toolbar, .slide-toolbar {
+  position: fixed; z-index: 20; top: 12px; right: 12px; display: flex; align-items: center; gap: 7px;
+  padding: 7px; border: 1px solid #ffffff55; border-radius: 12px; background: #173f31e8; color: #fff;
+  box-shadow: 0 8px 25px #163b2c33; font-size: 12px;
+}
+.document-toolbar a, .slide-toolbar a, .slide-toolbar button {
+  border: 0; border-radius: 8px; padding: 7px 10px; background: #ffffff18; color: #fff;
+  font: inherit; text-decoration: none; cursor: pointer;
+}
+.document-toolbar a:hover, .slide-toolbar a:hover, .slide-toolbar button:hover { background: #ffffff2b; }
+
+/* Report: fixed A4 sheets. */
+.report-body { padding: 20px 0 50px; }
+.report-document { display: grid; justify-content: center; gap: 18px; }
+.report-page {
+  position: relative; width: 210mm; height: 297mm; padding: 14mm 16mm 15mm; overflow: hidden;
+  background: var(--paper); box-shadow: 0 10px 35px #1b332535; page-break-after: always; break-after: page;
+}
+.report-page:last-child { page-break-after: auto; break-after: auto; }
+.report-content { height: 263mm; overflow: hidden; }
+.report-page h1 { margin: 0 0 4.5mm; color: var(--forest); font-size: 19pt; line-height: 1.1; letter-spacing: -.035em; }
+.report-page h2 { margin: 3.2mm 0 1.4mm; color: var(--forest); font-size: 11.7pt; line-height: 1.16; }
+.report-page h3 { margin: 2.5mm 0 1mm; color: var(--green); font-size: 9.9pt; }
+.report-page p, .report-page li, .report-page td, .report-page th { font-size: 10pt; line-height: 1.22; }
+.report-page p { margin: 0 0 1.8mm; text-align: justify; }
+.report-page ul, .report-page ol { margin: 1.2mm 0 2mm; padding-left: 5.5mm; }
+.report-page li { margin: 0 0 .6mm; }
+.report-page blockquote {
+  margin: 2.5mm 0; padding: 2.5mm 3.5mm; border-left: 1.3mm solid var(--amber); border-radius: 0 2mm 2mm 0;
+  background: #f8f1e5; color: #4e4639;
+}
+.report-page blockquote p { margin: 0; text-align: left; }
+.report-page table { width: 100%; margin: 1.8mm 0 2.5mm; border-collapse: collapse; table-layout: auto; }
+.report-page th, .report-page td { padding: 1.15mm 1.45mm; border: .25mm solid var(--line); vertical-align: top; text-align: left; }
+.report-page th { background: var(--sage); color: var(--forest); font-weight: 750; }
+.report-page tr:nth-child(even) td { background: #f7faf6; }
+.report-page code { font-family: var(--mono); font-size: .86em; }
+.report-page pre {
+  max-height: 61mm; margin: 1.8mm 0 2.5mm; padding: 2.2mm 2.7mm; overflow: hidden;
+  border: .25mm solid #cbd8ce; border-radius: 2mm; background: #f2f6f1; color: #244234;
+  font: 6.5pt/1.15 var(--mono); white-space: pre-wrap;
+}
+.page-footer {
+  position: absolute; right: 16mm; bottom: 6.5mm; left: 16mm; display: flex; justify-content: space-between;
+  padding-top: 2mm; border-top: .25mm solid var(--line); color: var(--muted); font-size: 7.5pt;
+}
+.cover-page { padding: 0; background: var(--forest); color: #f7fbf5; }
+.cover-page::before, .cover-page::after {
+  content: ""; position: absolute; border: .4mm solid #84a88f66; border-radius: 50%;
+}
+.cover-page::before { width: 130mm; height: 130mm; right: -58mm; top: -42mm; }
+.cover-page::after { width: 95mm; height: 95mm; left: -38mm; bottom: -34mm; }
+.cover-page .report-content { height: 297mm; padding: 34mm 24mm 28mm; }
+.cover-page h1 { max-width: 155mm; margin-top: 26mm; color: #fff; font-size: 31pt; }
+.cover-page h2 { margin-top: 7mm; color: #bfe0bd; font-size: 18pt; }
+.cover-page p { max-width: 155mm; font-size: 10.5pt; line-height: 1.5; text-align: left; }
+.cover-page blockquote { margin-top: 13mm; background: #ffffff10; color: #edf7eb; border-color: #d59b4f; }
+.cover-page .page-footer { color: #d7e8d5; border-color: #ffffff28; }
+.cover-page strong { color: #fff; }
+
+/* Slides: 16:9. */
+.slides-body { min-height: 100vh; overflow: hidden; background: #0d281f; }
+.slide-deck { position: relative; width: 100vw; height: 100vh; }
+.slide {
+  position: absolute; inset: 50% auto auto 50%; display: none; width: min(100vw, 177.7778vh); height: min(56.25vw, 100vh);
+  transform: translate(-50%, -50%); overflow: hidden; padding: 5.5vh 6.5vw 5vh; background: var(--paper); color: var(--ink);
+}
+.slide.active { display: block; }
+.slide::before {
+  content: "VÍ NHỎ · FINTECH"; position: absolute; top: 2.8vh; left: 6.5vw; color: var(--green);
+  font-size: clamp(8px, 1vw, 15px); font-weight: 800; letter-spacing: .14em;
+}
+.slide::after {
+  content: attr(data-number) " / " attr(data-total); position: absolute; right: 4vw; bottom: 2.3vh;
+  color: var(--muted); font-size: clamp(9px, 1.05vw, 15px);
+}
+.slide-content { height: 100%; overflow: hidden; }
+.slide h1 { max-width: 88%; margin: 1.8vh 0 3vh; color: var(--forest); font-size: clamp(25px, 3.55vw, 52px); line-height: 1.04; letter-spacing: -.045em; }
+.slide h2 { margin: 2vh 0 1vh; color: var(--green); font-size: clamp(16px, 2.05vw, 30px); line-height: 1.12; }
+.slide h3 { color: var(--amber); font-size: clamp(13px, 1.5vw, 22px); }
+.slide p, .slide li, .slide td, .slide th { font-size: clamp(13px, 1.48vw, 22px); line-height: 1.32; }
+.slide p { margin: 1.2vh 0; }
+.slide ul, .slide ol { margin: 1.2vh 0; padding-left: 2vw; }
+.slide li { margin: .75vh 0; }
+.slide blockquote { margin: 2.4vh 0; padding: 1.4vh 1.5vw; border-left: .55vw solid var(--amber); border-radius: 0 .7vw .7vw 0; background: #f4ecdd; color: #403b32; }
+.slide table { width: 100%; margin: 1.4vh 0; border-collapse: collapse; }
+.slide th, .slide td { padding: .75vh .8vw; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.slide th { background: var(--sage); color: var(--forest); }
+.slide:first-child { padding: 10vh 8vw; background: var(--forest); color: #f5fbf3; }
+.slide:first-child::before { color: #b8d9b7; }
+.slide:first-child::after { color: #d7e8d5; }
+.slide:first-child h1 { max-width: 78%; margin-top: 10vh; color: #fff; font-size: clamp(38px, 5.6vw, 82px); }
+.slide:first-child h2 { color: #bfe0bd; font-size: clamp(25px, 3.7vw, 54px); }
+.slide:first-child p { max-width: 75%; }
+.slide:first-child strong { color: #f0bd6d; }
+.slide-progress { position: fixed; z-index: 25; bottom: 0; left: 0; width: 100%; height: 5px; border: 0; appearance: none; background: #264b3b; }
+.slide-progress::-webkit-progress-bar { background: #264b3b; }
+.slide-progress::-webkit-progress-value { background: #82bd83; transition: width .18s ease; }
+.slide-progress::-moz-progress-bar { background: #82bd83; }
+
+.report-page { page: report; }
+.slide { page: slides; }
+@page report { size: A4; margin: 0; }
+@page slides { size: 13.333333in 7.5in; margin: 0; }
+@media print {
+  html, body { background: #fff; }
+  .document-toolbar, .slide-toolbar, .slide-progress { display: none !important; }
+  .report-body { padding: 0; }
+  .report-document { display: block; }
+  .report-page { margin: 0; box-shadow: none; }
+  .slides-body { overflow: visible; }
+  .slide-deck { width: auto; height: auto; }
+  .slide {
+    position: relative; inset: auto; display: block !important; width: 13.333333in; height: 7.5in;
+    transform: none; page-break-after: always; break-after: page;
+  }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+}
+@media screen and (max-width: 850px) { .report-body { padding-top: 55px; } }
