@@ -8,7 +8,9 @@ const crypto = require('node:crypto');
 const {DatabaseSync} = require('node:sqlite');
 const Wallet = require('./model');
 
-const HOST = '127.0.0.1';
+const HOST = process.env.HOST || '127.0.0.1';
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+const DEMO_TTL_MS = 24 * 60 * 60 * 1000;
 const SESSION_COOKIE = 'vn_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -234,15 +236,26 @@ function clearSessionCookie(secure) {
 }
 
 function requestIsSecure(req) {
-  return Boolean(req.socket.encrypted);
+  if (req.socket.encrypted) return true;
+  return TRUST_PROXY && String(req.headers['x-forwarded-proto'] ?? '').split(',', 1)[0].trim() === 'https';
 }
 
-function assertLocalHost(req) {
+function clientAddress(req) {
+  if (TRUST_PROXY) {
+    const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',', 1)[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+// Only local hosts are accepted by default (DNS-rebinding protection). A deployment adds its own
+// domain through ALLOWED_HOSTS, for example ALLOWED_HOSTS=vinho.example.com.
+function assertAllowedHost(req, extraHosts) {
   const host = String(req.headers.host ?? '');
   let hostname;
   try { hostname = new URL(`http://${host}`).hostname.toLowerCase(); }
   catch { throw new HttpError(400, 'invalid_host', 'Máy chủ yêu cầu không hợp lệ.'); }
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) {
+  if (!['127.0.0.1', 'localhost', '[::1]', ...extraHosts].includes(hostname)) {
     throw new HttpError(403, 'invalid_host', 'Máy chủ yêu cầu không hợp lệ.');
   }
 }
@@ -400,6 +413,9 @@ function createApp(options = {}) {
   const maxBodyBytes = options.maxBodyBytes ?? MAX_BODY_BYTES;
   const authRateLimit = options.authRateLimit ?? AUTH_RATE_LIMIT;
   const authWindowMs = options.authWindowMs ?? AUTH_WINDOW_MS;
+  const allowedHosts = (options.allowedHosts ?? String(process.env.ALLOWED_HOSTS ?? '').split(','))
+    .map(host => String(host).trim().toLowerCase()).filter(Boolean);
+  const demoTtlMs = options.demoTtlMs ?? DEMO_TTL_MS;
   if (dbPath !== ':memory:') mkdirSync(path.dirname(path.resolve(dbPath)), {recursive: true});
   const db = new DatabaseSync(dbPath);
   createSchema(db);
@@ -413,7 +429,7 @@ function createApp(options = {}) {
   }
 
   function consumeAuthAttempt(req) {
-    const key = req.socket.remoteAddress ?? 'unknown';
+    const key = clientAddress(req);
     const current = now();
     const entry = rate.get(key);
     if (!entry || current - entry.startedAt >= authWindowMs) {
@@ -423,6 +439,14 @@ function createApp(options = {}) {
     entry.count += 1;
     if (entry.count > authRateLimit) throw new HttpError(429, 'rate_limited', 'Bạn đã thử quá nhiều lần. Vui lòng đợi rồi thử lại.');
   }
+
+  // Demo workspaces are throwaway: remove them (and their data, via ON DELETE CASCADE) after a day.
+  function purgeDemoUsers() {
+    const cutoff = new Date(now() - demoTtlMs).toISOString();
+    db.prepare("DELETE FROM users WHERE email LIKE 'demo-%@local.invalid' AND created_at < ?").run(cutoff);
+    db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
+  }
+  purgeDemoUsers();
 
   function createSession(res, userId, req) {
     const token = crypto.randomBytes(32).toString('base64url');
@@ -495,7 +519,7 @@ function createApp(options = {}) {
   }
 
   async function route(req, res) {
-    assertLocalHost(req);
+    assertAllowedHost(req, allowedHosts);
     let pathname;
     try {
       pathname = new URL(req.url, 'http://local').pathname;
@@ -545,6 +569,7 @@ function createApp(options = {}) {
       assertJsonRequest(req);
       consumeAuthAttempt(req);
       await readJson(req, maxBodyBytes);
+      purgeDemoUsers();
       const suffix = crypto.randomUUID();
       const state = demoState();
       const user = createUserWithWallet({
@@ -565,6 +590,52 @@ function createApp(options = {}) {
       const user = currentUser(req);
       if (user) audit(user.id, 'logout');
       if (token) db.prepare('DELETE FROM sessions WHERE id_hash = ?').run(tokenHash(token));
+      return sendJson(res, 200, {ok: true}, {'Set-Cookie': clearSessionCookie(requestIsSecure(req))});
+    }
+
+    if (req.method === 'POST' && pathname === '/api/password') {
+      assertSameOrigin(req);
+      assertJsonRequest(req);
+      const user = requireUser(req);
+      consumeAuthAttempt(req);
+      const body = await readJson(req, maxBodyBytes);
+      const current = typeof body?.currentPassword === 'string' ? body.currentPassword : '';
+      const next = typeof body?.newPassword === 'string' ? body.newPassword : '';
+      if (next.length < 10 || next.length > 128) throw new HttpError(400, 'weak_password', 'Mật khẩu mới phải có từ 10 đến 128 ký tự.');
+      const row = db.prepare('SELECT password_hash, password_salt FROM users WHERE id = ?').get(user.id);
+      if (!passwordMatches(current, row.password_salt, row.password_hash)) {
+        throw new HttpError(401, 'invalid_credentials', 'Mật khẩu hiện tại không đúng.');
+      }
+      const record = passwordRecord(next);
+      const token = cookieValues(req.headers.cookie)[SESSION_COOKIE];
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?').run(record.hash, record.salt, user.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id_hash <> ?').run(user.id, tokenHash(token));
+        db.prepare('INSERT INTO audit (user_id, action, created_at) VALUES (?, ?, ?)').run(user.id, 'password_change', nowIso(now));
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch {}
+        throw error;
+      }
+      return sendJson(res, 200, {ok: true});
+    }
+
+    if (req.method === 'POST' && pathname === '/api/account/delete') {
+      assertSameOrigin(req);
+      assertJsonRequest(req);
+      const user = requireUser(req);
+      const body = await readJson(req, maxBodyBytes);
+      const demo = user.email.endsWith('@local.invalid');
+      if (!demo) {
+        consumeAuthAttempt(req);
+        const row = db.prepare('SELECT password_hash, password_salt FROM users WHERE id = ?').get(user.id);
+        const password = typeof body?.password === 'string' ? body.password : '';
+        if (!passwordMatches(password, row.password_salt, row.password_hash)) {
+          throw new HttpError(401, 'invalid_credentials', 'Mật khẩu không đúng.');
+        }
+      }
+      db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
       return sendJson(res, 200, {ok: true}, {'Set-Cookie': clearSessionCookie(requestIsSecure(req))});
     }
 

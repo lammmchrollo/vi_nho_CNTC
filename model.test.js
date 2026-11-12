@@ -78,17 +78,98 @@ test('forecast chỉ dùng ngày đã trôi qua, tháng cũ dùng thực tế v�
     {type: 'in', amount: 5000000, date: '2026-11-01'}
   ];
   assert.deepEqual(Wallet.forecast(rows, '2026-11', '2026-11-10'), {
+    projectedExpense: 2500000, actualExpense: 1000000, daysElapsed: 10,
+    daysInMonth: 30, remainingDays: 20, method: 'blended',
+    fixedExpense: 0, variableExpense: 1000000, historyAverage: 2000000
+  });
+  assert.deepEqual(Wallet.forecast(rows.slice(1), '2026-11', '2026-11-10'), {
     projectedExpense: 3000000, actualExpense: 1000000, daysElapsed: 10,
-    daysInMonth: 30, remainingDays: 20, method: 'run-rate'
+    daysInMonth: 30, remainingDays: 20, method: 'run-rate',
+    fixedExpense: 0, variableExpense: 1000000, historyAverage: null
   });
   assert.deepEqual(Wallet.forecast(rows, '2026-10', '2026-11-10'), {
     projectedExpense: 2000000, actualExpense: 2000000, daysElapsed: 31,
-    daysInMonth: 31, remainingDays: 0, method: 'actual'
+    daysInMonth: 31, remainingDays: 0, method: 'actual',
+    fixedExpense: 0, variableExpense: 0, historyAverage: null
   });
   assert.deepEqual(Wallet.forecast(rows, '2026-12', '2026-11-10'), {
     projectedExpense: null, actualExpense: 0, daysElapsed: 0,
-    daysInMonth: 31, remainingDays: 31, method: 'unavailable'
+    daysInMonth: 31, remainingDays: 31, method: 'unavailable',
+    fixedExpense: 0, variableExpense: 0, historyAverage: null
   });
+});
+
+test('forecast không ngoại suy khoản cố định như tiền phòng', () => {
+  const rules = [{id: 'rent', type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng', day: 2, startMonth: '2026-01', active: true},
+    {id: 'net', type: 'out', category: 'Nhà ở', amount: 200000, note: 'Internet', day: 25, startMonth: '2026-01', active: true}];
+  const rows = [
+    {id: 'rec-rent-2026-11', type: 'out', category: 'Nhà ở', amount: 1700000, date: '2026-11-02'},
+    {id: 'food', type: 'out', category: 'Ăn uống', amount: 600000, date: '2026-11-05'}
+  ];
+  const result = Wallet.forecast(rows, '2026-11', '2026-11-10', rules);
+  // 1.7M rent + 0.2M internet still due + 0.6M food extrapolated over 30 days (1.8M).
+  assert.equal(result.projectedExpense, 1700000 + 200000 + 1800000);
+  assert.equal(result.fixedExpense, 1900000);
+  const naive = Wallet.forecast(rows, '2026-11', '2026-11-10');
+  assert.ok(naive.projectedExpense > result.projectedExpense);
+});
+
+test('seed và applyRecurring không ghi trùng lương, tiền phòng đã có', () => {
+  const state = Wallet.seed('2026-11-12');
+  for (const month of ['2026-06', '2026-08', '2026-11']) {
+    const result = Wallet.applyRecurring(state, month);
+    assert.equal(result.added.length, 0, month);
+  }
+  const manual = {version: 2, demo: false, budgets: [], goals: [], transactions: [
+    {id: 'typed', type: 'out', category: 'Nhà ở', amount: 1700000, date: '2026-11-03', note: 'Trả phòng'}
+  ], recurring: [{id: 'rent', type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng', day: 2, startMonth: '2026-01', active: true}]};
+  const result = Wallet.applyRecurring(manual, '2026-11');
+  assert.equal(result.added.length, 0);
+  assert.deepEqual(result.skipped, [{rule: 'rent', transaction: 'typed'}]);
+  assert.equal(Wallet.applyRecurring(manual, '2026-12').added.length, 1);
+});
+
+test('safeToSpend trừ khoản cố định chưa ghi và phần dành cho mục tiêu', () => {
+  const state = {version: 2, demo: false, budgets: [],
+    transactions: [{id: 'in', type: 'in', category: 'Trợ cấp', amount: 5000000, date: '2026-11-01', note: ''},
+      {id: 'out', type: 'out', category: 'Ăn uống', amount: 1000000, date: '2026-11-05', note: ''}],
+    goals: [{id: 'g', name: 'Laptop', target: 3000000, saved: 0, deadline: '2027-02-10'}],
+    recurring: [{id: 'rent', type: 'out', category: 'Nhà ở', amount: 1500000, note: '', day: 15, startMonth: '2026-01', active: true}]};
+  const result = Wallet.safeToSpend(state, '2026-11', '2026-11-11');
+  assert.equal(result.pendingFixed, 1500000);
+  assert.equal(result.goalReserve, 1000000);
+  assert.equal(result.available, 5000000 - 1000000 - 1500000 - 1000000);
+  assert.equal(result.remainingDays, 20);
+  assert.equal(result.perDay, 75000);
+  assert.equal(Wallet.safeToSpend(state, '2026-10', '2026-11-11'), null);
+});
+
+test('anomalies phát hiện danh mục chi cao bất thường so với các tháng trước', () => {
+  const state = Wallet.seed('2026-11-09');
+  const result = Wallet.anomalies(state.transactions, '2026-11');
+  assert.deepEqual(result.map(row => row.category), ['Học tập']);
+  assert.equal(result[0].average, 150000);
+  assert.ok(Wallet.insights(state, '2026-11', '2026-11-09').some(item => item.title === 'Chi tiêu khác thường'));
+});
+
+test('copyBudgets chỉ thêm danh mục còn thiếu ở tháng đích', () => {
+  const state = Wallet.seed('2026-11-09');
+  state.budgets.push({month: '2026-12', category: 'Ăn uống', cap: 2000000});
+  const result = Wallet.copyBudgets(state, '2026-11', '2026-12');
+  assert.deepEqual(result.added.map(row => row.category), ['Di chuyển', 'Học tập']);
+  assert.equal(result.state.budgets.find(row => row.month === '2026-12' && row.category === 'Ăn uống').cap, 2000000);
+});
+
+test('parseQuick hiểu cách ghi tiền và ngày quen thuộc của người Việt', () => {
+  const day = '2026-11-12';
+  assert.deepEqual(Wallet.parseQuick('ăn trưa 35k', day), {type: 'out', category: 'Ăn uống', amount: 35000, date: day, note: 'Ăn trưa'});
+  assert.deepEqual(Wallet.parseQuick('grab 50k hôm qua', day), {type: 'out', category: 'Di chuyển', amount: 50000, date: '2026-11-11', note: 'Grab'});
+  assert.equal(Wallet.parseQuick('+3tr lương', day).type, 'in');
+  assert.equal(Wallet.parseQuick('mẹ gửi 2tr5', day).amount, 2500000);
+  assert.equal(Wallet.parseQuick('3/11 sách 120.000', day).date, '2026-11-03');
+  assert.equal(Wallet.parseQuick('tiền nước 150k', day).category, 'Nhà ở');
+  assert.equal(Wallet.parseQuick('không có số tiền', day), null);
+  assert.equal(Wallet.parseQuick('quà 2000tr', day), null);
 });
 
 test('applyRecurring tạo ID ổn định, chặn tạo lặp và chốt ngày cuối tháng', () => {

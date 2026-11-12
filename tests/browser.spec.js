@@ -232,16 +232,27 @@ test('tạo mục tiêu, cập nhật tích lũy rồi xóa', async ({page}) => 
 test('giao dịch định kỳ chỉ được ghi một lần cho cùng tháng', async ({page}) => {
   await openDemo(page);
   await navigate(page, 'recurring');
-  await page.locator('[data-action="generate-recurring"]').click();
-  await expect(page.locator('#dialog')).toContainText('Sẽ tạo 2 giao dịch');
-  await confirmDialog(page, 'Ghi nhận giao dịch');
-
+  // Demo data already records this month's allowance and rent, so nothing may be added twice.
   await page.locator('[data-action="generate-recurring"]').click();
   await expect(page.locator('#toast')).toContainText('Không có giao dịch mới');
   await navigate(page, 'transactions');
-  await page.locator('#search').fill('Lương hàng tháng');
+  await page.locator('#search').fill('Tiền phòng hàng tháng');
   await expect(page.locator('#table-results tbody tr')).toHaveCount(1);
   await expect(page.locator('#table-results')).toContainText('1 giao dịch');
+});
+
+test('nhập nhanh tự điền giao dịch từ ghi chú tiếng Việt', async ({page}) => {
+  await openDemo(page);
+  await navigate(page, 'transactions');
+  await page.locator('#add').click();
+  await page.locator('#quick-entry').fill('grab 50k hôm qua');
+  const form = page.locator('#tx-form');
+  await expect(form.locator('[name="amount"]')).toHaveValue('50000');
+  await expect(form.locator('[name="category"]')).toHaveValue('Di chuyển');
+  await form.getByRole('button', {name: 'Lưu giao dịch'}).click();
+  await expect(page.locator('#toast')).toContainText('Đã ghi nhận giao dịch mới.');
+  await navigate(page, 'home');
+  await expect(page.locator('.safe-strip')).toContainText('HÔM NAY BẠN CÓ THỂ CHI');
 });
 
 test('sao lưu, từ chối JSON sai, khôi phục JSON đúng và trạng thái rỗng trên báo cáo', async ({page}) => {

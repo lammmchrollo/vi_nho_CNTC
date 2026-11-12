@@ -168,10 +168,25 @@ function expenseComposition(rows) {
   return `<div class="donut-layout"><svg class="donut" viewBox="0 0 180 180" role="img" aria-label="Tỷ trọng chi tiêu theo danh mục">${segments}<circle cx="90" cy="90" r="49" fill="white"/><text x="90" y="85" text-anchor="middle" font-size="10">Tổng chi tiêu</text><text x="90" y="106" text-anchor="middle" font-size="17" font-weight="600">${number(total/1000000)} triệu</text></svg><div class="donut-key">${amounts.map(([name,value],i) => `<div><i class="swatch palette-${i}"></i><span>${esc(name)}</span><strong>${number(value/total*100)}%</strong></div>`).join('')}</div></div>`;
 }
 
-function forecastBox(rows) {
-  const result = Wallet.forecast(rows, month, today());
+function forecastBox() {
+  const result = Wallet.forecast(state.transactions, month, today(), state.recurring);
   const projected = result.projectedExpense;
-  return `<div class="forecast-box"><div><small>ƯỚC TÍNH CHI TIÊU CUỐI THÁNG</small><strong>${projected == null ? 'Chưa đủ dữ liệu' : money(projected)}</strong></div><p>${month < today().slice(0,7) ? 'Tháng đã kết thúc: hiển thị tổng chi thực tế.' : month > today().slice(0,7) ? 'Chưa dự báo cho tháng tương lai.' : projected == null ? 'Chưa có khoản chi đã xảy ra trong tháng để ước tính. Hãy ghi nhận chi tiêu thực tế trước.' : 'Chi đã ghi đến hôm nay / số ngày đã qua × số ngày trong tháng. Ước tính tuyến tính, không phải AI; có thể lệch khi có khoản chi bất thường.'}</p></div>`;
+  const explain = result.method === 'blended'
+    ? `Cố định ${money(result.fixedExpense)} (tiền phòng, lịch định kỳ) được cộng nguyên. Chi linh hoạt ${money(result.variableExpense)} đến hôm nay được ngoại suy rồi lấy trung bình với mức ${money(result.historyAverage)}/tháng của các tháng trước. Quy tắc minh bạch, không phải AI.`
+    : `Cố định ${money(result.fixedExpense)} được cộng nguyên; chi linh hoạt ${money(result.variableExpense)} ngoại suy theo số ngày đã qua. Chưa có lịch sử để đối chiếu nên ước tính có thể lệch.`;
+  return `<div class="forecast-box"><div><small>ƯỚC TÍNH CHI TIÊU CUỐI THÁNG</small><strong>${projected == null ? 'Chưa đủ dữ liệu' : money(projected)}</strong></div><p>${month < today().slice(0,7) ? 'Tháng đã kết thúc: hiển thị tổng chi thực tế.' : month > today().slice(0,7) ? 'Chưa dự báo cho tháng tương lai.' : projected == null ? 'Chưa có khoản chi đã xảy ra trong tháng để ước tính. Hãy ghi nhận chi tiêu thực tế trước.' : explain}</p></div>`;
+}
+
+function safeToSpendStrip() {
+  const result = Wallet.safeToSpend(state, month, today());
+  if (!result) return '';
+  const parts = [`thu đã ghi ${money(result.income)}`];
+  if (result.pendingIncome) parts.push(`+ thu định kỳ chưa ghi ${money(result.pendingIncome)}`);
+  parts.push(`− chi đã ghi ${money(result.expense)}`);
+  if (result.pendingFixed) parts.push(`− chi cố định sắp tới ${money(result.pendingFixed)}`);
+  if (result.goalReserve) parts.push(`− dành cho mục tiêu ${money(result.goalReserve)}`);
+  const tone = result.perDay > 0 ? '' : ' warning';
+  return `<section class="safe-strip${tone}" aria-label="Hạn mức chi mỗi ngày"><div class="safe-main"><small>HÔM NAY BẠN CÓ THỂ CHI</small><strong>${money(result.perDay)}<span>/ngày</span></strong></div><p>${result.perDay > 0 ? `Còn ${money(result.available)} cho ${result.remainingDays} ngày còn lại của tháng` : `Kế hoạch tháng này đang thiếu ${money(Math.abs(result.available))}. Cân nhắc giảm chi linh hoạt hoặc giãn mục tiêu`}: ${parts.join(' ')}.</p></section>`;
 }
 
 function render() {
@@ -190,7 +205,7 @@ function render() {
   });
   const rows = Wallet.period(state.transactions,month).slice().reverse().sort((a,b) => b.date.localeCompare(a.date));
   const view = $('view');
-  if (page === 'home') view.innerHTML = metrics(rows) + `<div class="dashboard-grid">${panel('Dòng tiền của bạn','Thu nhập và chi tiêu trong 6 tháng gần nhất',cashflowChart(),legend)}${panel('Ngân sách tháng này','Giữ kế hoạch của bạn trong tầm kiểm soát',budgetRows(rows),jump('budgets','Chi tiết'))}${panel('Giao dịch gần đây','Những khoản thu, chi mới nhất trong tháng',transactionTable(rows.slice(0,5)),jump('transactions','Xem tất cả'))}${panel('Góc nhìn tài chính','Một vài gợi ý từ dữ liệu bạn đã ghi',insightCards())}</div>`;
+  if (page === 'home') view.innerHTML = metrics(rows) + safeToSpendStrip() + `<div class="dashboard-grid">${panel('Dòng tiền của bạn','Thu nhập và chi tiêu trong 6 tháng gần nhất',cashflowChart(),legend)}${panel('Ngân sách tháng này','Giữ kế hoạch của bạn trong tầm kiểm soát',budgetRows(rows),jump('budgets','Chi tiết'))}${panel('Giao dịch gần đây','Những khoản thu, chi mới nhất trong tháng',transactionTable(rows.slice(0,5)),jump('transactions','Xem tất cả'))}${panel('Góc nhìn tài chính','Một vài gợi ý từ dữ liệu bạn đã ghi',insightCards())}</div>`;
   if (page === 'transactions') {
     view.innerHTML = panel('Sổ giao dịch','Thu và chi trong tháng ' + monthText(month),`<div class="filters"><label class="search-field">${Icons('search')}<input id="search" type="search" aria-label="Tìm giao dịch" placeholder="Tìm ghi chú, danh mục…"></label><select id="type-filter" aria-label="Loại giao dịch"><option value="all">Tất cả thu & chi</option><option value="in">Chỉ khoản thu</option><option value="out">Chỉ khoản chi</option></select><select id="category-filter" aria-label="Danh mục"><option value="all">Mọi danh mục</option>${options([...new Set([...Wallet.expenses,...Wallet.income])])}</select><select id="sort" aria-label="Sắp xếp"><option value="date-desc">Mới nhất</option><option value="date-asc">Cũ nhất</option><option value="amount-desc">Tiền nhiều nhất</option><option value="amount-asc">Tiền ít nhất</option></select></div><div id="table-results"></div>`,`<button class="secondary" data-action="csv">${Icons('download')} Xuất CSV</button>`);
     $('search').value = search; $('type-filter').value = typeFilter; $('category-filter').value = category; $('sort').value = sort;
@@ -203,10 +218,10 @@ function render() {
     });
     renderTable();
   }
-  if (page === 'budgets') view.innerHTML = panel('Hạn mức theo danh mục','Cảnh báo từ 80% · Vượt hạn mức khi chi nhiều hơn ngân sách',budgetRows(rows,true)) + `<div class="alert info">${Icons('info')}<span>Ngân sách là giới hạn chi của từng danh mục trong tháng, không phải số dư tài khoản. Khoản thu không làm giảm phần ngân sách đã dùng.</span></div>`;
+  if (page === 'budgets') view.innerHTML = panel('Hạn mức theo danh mục','Cảnh báo từ 80% · Vượt hạn mức khi chi nhiều hơn ngân sách',budgetRows(rows,true),`<button class="secondary" data-action="copy-budgets">${Icons('repeat')} Sao chép từ tháng trước</button>`) + `<div class="alert info">${Icons('info')}<span>Ngân sách là giới hạn chi của từng danh mục trong tháng, không phải số dư tài khoản. Khoản thu không làm giảm phần ngân sách đã dùng.</span></div>`;
   if (page === 'goals') view.innerHTML = goalCards() + `<div class="alert info">${Icons('info')}<span>Số đã tích lũy là khoản bạn tự phân bổ cho mục tiêu. Cập nhật mục tiêu không tạo giao dịch thu/chi và không tự chuyển tiền. Hãy tránh phân bổ cùng một khoản tiền cho nhiều mục tiêu.</span></div>`;
   if (page === 'recurring') view.innerHTML = panel('Lịch thu chi hàng tháng','Chọn tháng rồi xác nhận để ghi nhận. Mỗi lịch chỉ tạo một giao dịch trong một tháng.',recurringTable(),`<button class="primary" data-action="generate-recurring">${Icons('repeat')} Ghi nhận tháng ${monthText(month)}</button>`) + `<div class="alert info">${Icons('clock')}<span>Ứng dụng không chạy ngầm và không tự thanh toán. Khoản tiền chỉ được ghi vào sổ sau khi bạn xác nhận. Nếu ngày 31 không tồn tại, hệ thống chọn ngày cuối tháng.</span></div>`;
-  if (page === 'reports') view.innerHTML = metrics(rows) + `<div class="dashboard-grid">${panel('Xu hướng thu chi','6 tháng tính đến ' + monthText(month),cashflowChart() + forecastBox(rows),legend)}${panel('Tiền của bạn đi đâu?','Tỷ trọng các khoản chi trong tháng',expenseComposition(rows))}${panel('Chi tiết dòng tiền','Số liệu từ các giao dịch đã ghi',trendTable(),'<button class="text-button" data-action="print">' + Icons('print') + ' In báo cáo</button>')}${panel('Gợi ý điều chỉnh','Các quy tắc minh bạch, không sử dụng mô hình AI',insightCards())}</div>`;
+  if (page === 'reports') view.innerHTML = metrics(rows) + `<div class="dashboard-grid">${panel('Xu hướng thu chi','6 tháng tính đến ' + monthText(month),cashflowChart() + forecastBox(),legend)}${panel('Tiền của bạn đi đâu?','Tỷ trọng các khoản chi trong tháng',expenseComposition(rows))}${panel('Chi tiết dòng tiền','Số liệu từ các giao dịch đã ghi',trendTable(),'<button class="text-button" data-action="print">' + Icons('print') + ' In báo cáo</button>')}${panel('Gợi ý điều chỉnh','Các quy tắc minh bạch, không sử dụng mô hình AI',insightCards())}</div>`;
   if (page === 'settings') { view.innerHTML = settingsView(); loadAudit(); }
 }
 
@@ -242,13 +257,14 @@ function settingsView() {
     ${panel('Sao lưu & khôi phục','Bản JSON chứa toàn bộ sổ; CSV chỉ chứa giao dịch theo bộ lọc',`<p>Tải bản sao lưu trước khi chuyển máy hoặc thay dữ liệu. Tệp JSON không chứa mật khẩu, nhưng có thông tin thu chi cá nhân; hãy cất giữ cẩn thận.</p><div class="settings-actions"><button class="primary" data-action="backup">${Icons('download')} Sao lưu JSON</button><button class="secondary" data-action="import">${Icons('upload')} Khôi phục JSON</button><input type="file" id="import-file" accept=".json,application/json" hidden></div>`)}
     ${panel('Dữ liệu mẫu & dữ liệu cũ','Bạn luôn được xem lại trước khi thay thế dữ liệu',`<p>Bộ mô phỏng bao gồm 6 tháng thu chi, ngân sách và mục tiêu. Sổ phiên bản cũ được nhập từ trình duyệt này và giữ nguyên khoản thu, chi.</p><div class="settings-actions"><button class="secondary" data-action="seed">${Icons('sprout')} Nạp dữ liệu mẫu</button><button class="secondary" data-action="legacy">Nhập sổ phiên bản cũ</button><button class="danger" data-action="clear">Xóa dữ liệu sổ</button></div>`)}
     ${panel('Quyền riêng tư & giới hạn','Một prototype minh bạch về khả năng của mình',`<p>Mật khẩu được băm bằng scrypt. Phiên đăng nhập dùng cookie HttpOnly. Dữ liệu thu chi nằm trong SQLite trên máy chủ chạy ứng dụng; chưa mã hóa nội dung cơ sở dữ liệu.</p><p>Không truy cập ngân hàng, không thực hiện thanh toán, không có AI hoặc tư vấn đầu tư. Chỉ ghi nhận các giao dịch bạn nhập.</p><details><summary>Dòng tiền ròng khác số dư ngân hàng thế nào?</summary><p>Dòng tiền ròng = khoản thu − khoản chi đã ghi trong tháng. Chưa có số dư đầu kỳ, nên không thể xem đây là số tiền thực có trong ngân hàng.</p></details><details><summary>Tại sao số liệu mục tiêu không thay đổi thu chi?</summary><p>Mục tiêu là cách theo dõi số tiền đã dành riêng. Tự động ghi khoản chi khi phân bổ tiền sẽ làm sai dòng tiền, vì tiền chưa thực sự được chi.</p></details><details><summary>Khi hai tab cùng sửa dữ liệu?</summary><p>Máy chủ kiểm tra số phiên bản. Nếu có thay đổi mới, thao tác cũ bị từ chối và ứng dụng tải lại sổ để tránh ghi đè.</p></details>`)}
+    ${panel('Bảo mật tài khoản','Quyền kiểm soát dữ liệu của chính bạn',`<p>Đổi mật khẩu sẽ đăng xuất các thiết bị khác. Xóa tài khoản xóa vĩnh viễn toàn bộ dữ liệu trên máy chủ, đáp ứng quyền yêu cầu xóa dữ liệu cá nhân.</p><div class="settings-actions">${user.email.endsWith('@local.invalid') ? '' : `<button class="secondary" data-action="change-password">${Icons('shield')} Đổi mật khẩu</button>`}<button class="danger" data-action="delete-account">${Icons('trash')} Xóa tài khoản</button></div>`)}
     ${panel('Lịch sử hoạt động','Các lần thay đổi dữ liệu gần đây','<ul class="audit-list" id="audit-list"><li>Đang tải lịch sử…</li></ul>')}
-    ${panel('Hồ sơ dự án FinTech','Đề tài: Hệ thống quản lý tài chính cá nhân',`<p>Báo cáo, slide thuyết trình, thiết kế và kịch bản demo được lưu trong thư mục docs của mã nguồn.</p><div class="settings-actions"><a class="secondary" href="/docs/report.html" target="_blank" rel="noopener">${Icons('report')} Đọc báo cáo</a><a class="secondary" href="/docs/presentation.html" target="_blank" rel="noopener">${Icons('chart')} Mở slide</a></div>`)}</div>`;
+    ${panel('Hồ sơ dự án FinTech','Đề tài: Hệ thống quản lý tài chính cá nhân',`<p>Báo cáo, slide thuyết trình, thiết kế và kịch bản demo được lưu trong thư mục docs của mã nguồn.</p><div class="settings-actions"><a class="secondary" href="https://github.com/lammmchrollo/vi_nho_CNTC/blob/main/docs/report.md" target="_blank" rel="noopener">${Icons('report')} Đọc báo cáo</a><a class="secondary" href="https://github.com/lammmchrollo/vi_nho_CNTC/blob/main/docs/presentation.md" target="_blank" rel="noopener">${Icons('chart')} Mở slide</a></div>`)}</div>`;
 }
 async function loadAudit() {
   try {
     const result = await Api.request('audit');
-    if (page === 'settings' && $('audit-list')) $('audit-list').innerHTML = result.events.length ? result.events.map(r => `<li><span>${esc(({register:'Tạo tài khoản',login:'Đăng nhập',demo:'Tạo sổ mô phỏng',update:'Cập nhật sổ',state_update:'Cập nhật sổ',logout:'Đăng xuất'})[r.action] || r.action)}</span><time>${esc(new Date(r.createdAt).toLocaleString('vi-VN'))}</time></li>`).join('') : '<li>Chưa có hoạt động nào.</li>';
+    if (page === 'settings' && $('audit-list')) $('audit-list').innerHTML = result.events.length ? result.events.map(r => `<li><span>${esc(({register:'Tạo tài khoản',login:'Đăng nhập',demo:'Tạo sổ mô phỏng',update:'Cập nhật sổ',state_update:'Cập nhật sổ',logout:'Đăng xuất',password_change:'Đổi mật khẩu'})[r.action] || r.action)}</span><time>${esc(new Date(r.createdAt).toLocaleString('vi-VN'))}</time></li>`).join('') : '<li>Chưa có hoạt động nào.</li>';
   } catch { if ($('audit-list')) $('audit-list').innerHTML = '<li>Chưa tải được lịch sử. Hãy thử tải lại dữ liệu.</li>'; }
 }
 
@@ -281,9 +297,19 @@ function bindForm(id, handler) {
 function transactionDialog(existing) {
   const type = existing?.type || 'out';
   const date = existing?.date || (today().startsWith(month) ? today() : month + '-01');
-  openDialog(existing ? 'Điều chỉnh giao dịch' : 'Thêm giao dịch mới', `<form id="tx-form"><div class="form-grid"><label class="field">Loại giao dịch<select name="type">${options(['out','in'],type).replace('>out<','>Khoản chi<').replace('>in<','>Khoản thu<')}</select></label>${amountField('Số tiền (VND)',existing?.amount)}<label class="field">Danh mục<select name="category">${options(type === 'out' ? Wallet.expenses : Wallet.income,existing?.category)}</select></label>${dateField('Ngày giao dịch','date',date)}<label class="field wide">Ghi chú<input name="note" maxlength="100" placeholder="Ví dụ: Ăn trưa, lương tháng…" value="${esc(existing?.note)}"></label></div>${errorMarkup}${actions('Lưu giao dịch')}</form>`);
+  openDialog(existing ? 'Điều chỉnh giao dịch' : 'Thêm giao dịch mới', `<form id="tx-form">${existing ? '' : '<label class="field quick-field">Nhập nhanh<input id="quick-entry" maxlength="200" autocomplete="off" placeholder="Ví dụ: ăn trưa 35k · grab 50k hôm qua · +3tr lương"><small id="quick-hint">Gõ như ghi chú; ứng dụng tự điền số tiền, danh mục và ngày. Bạn vẫn kiểm tra trước khi lưu.</small></label>'}<div class="form-grid"><label class="field">Loại giao dịch<select name="type">${options(['out','in'],type).replace('>out<','>Khoản chi<').replace('>in<','>Khoản thu<')}</select></label>${amountField('Số tiền (VND)',existing?.amount)}<label class="field">Danh mục<select name="category">${options(type === 'out' ? Wallet.expenses : Wallet.income,existing?.category)}</select></label>${dateField('Ngày giao dịch','date',date)}<label class="field wide">Ghi chú<input name="note" maxlength="100" placeholder="Ví dụ: Ăn trưa, lương tháng…" value="${esc(existing?.note)}"></label></div>${errorMarkup}${actions('Lưu giao dịch')}</form>`);
   const form = $('tx-form');
   form.elements.type.onchange = event => { form.elements.category.innerHTML = options(event.target.value === 'in' ? Wallet.income : Wallet.expenses); };
+  $('quick-entry')?.addEventListener('input', event => {
+    const parsed = Wallet.parseQuick(event.target.value, today());
+    if (!parsed) { $('quick-hint').textContent = event.target.value.trim() ? 'Chưa nhận ra số tiền. Thử viết 35k, 1tr5 hoặc 120.000.' : 'Gõ như ghi chú; ứng dụng tự điền số tiền, danh mục và ngày.'; return; }
+    form.elements.type.value = parsed.type;
+    form.elements.category.innerHTML = options(parsed.type === 'in' ? Wallet.income : Wallet.expenses, parsed.category);
+    form.elements.amount.value = parsed.amount;
+    form.elements.date.value = parsed.date;
+    form.elements.note.value = parsed.note;
+    $('quick-hint').textContent = `${parsed.type === 'in' ? 'Khoản thu' : 'Khoản chi'} · ${parsed.category} · ${money(parsed.amount)} · ${dateText(parsed.date)}`;
+  });
   bindForm('tx-form', async fields => {
     const row = {id:existing?.id || uid(),type:fields.get('type'),category:fields.get('category'),amount:Number(fields.get('amount')),date:fields.get('date'),note:fields.get('note').trim()};
     const next = clone(state);
@@ -292,7 +318,7 @@ function transactionDialog(existing) {
     month = row.date.slice(0,7); tablePage = 1;
     $('dialog').close(); render();
   });
-  form.elements.amount.focus();
+  ($('quick-entry') || form.elements.amount).focus();
 }
 
 function budgetDialog(categoryName) {
@@ -355,6 +381,26 @@ function recurringDialog(existing) {
   });
 }
 
+function passwordDialog() {
+  openDialog('Đổi mật khẩu',`<form id="password-form"><div class="form-grid"><label class="field wide">Mật khẩu hiện tại<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="128"></label><label class="field wide">Mật khẩu mới<input name="newPassword" type="password" autocomplete="new-password" required minlength="10" maxlength="128" placeholder="Tối thiểu 10 ký tự"></label></div><p class="dialog-body">Các phiên đăng nhập khác sẽ bị đăng xuất.</p>${errorMarkup}${actions('Đổi mật khẩu')}</form>`);
+  bindForm('password-form', async fields => {
+    await Api.request('password','POST',{currentPassword:fields.get('currentPassword'),newPassword:fields.get('newPassword')});
+    $('dialog').close();
+    toast('Đã đổi mật khẩu.');
+  });
+}
+
+function deleteAccountDialog() {
+  const demo = user.email.endsWith('@local.invalid');
+  openDialog('Xóa tài khoản?',`<form id="delete-form"><p class="dialog-body">Tài khoản ${esc(user.email)} cùng toàn bộ giao dịch, ngân sách, mục tiêu và lịch sử hoạt động sẽ bị xóa vĩnh viễn khỏi máy chủ. Không thể hoàn tác; hãy tải bản sao lưu JSON trước nếu cần.</p>${demo ? '' : '<label class="field">Nhập mật khẩu để xác nhận<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>'}${errorMarkup}${actions('Xóa vĩnh viễn',true)}</form>`);
+  bindForm('delete-form', async fields => {
+    await Api.request('account/delete','POST',demo ? {} : {password:fields.get('password')});
+    $('dialog').close();
+    state = null; user = null; revision = 0;
+    showAuth(false,'Tài khoản đã được xóa.');
+  });
+}
+
 function confirmChange(title, description, build, label = 'Xác nhận', danger = false, after) {
   openDialog(title,`<p class="dialog-body">${description}</p><form id="confirm-form">${errorMarkup}${actions(label,danger)}</form>`);
   bindForm('confirm-form',async () => {
@@ -411,6 +457,18 @@ async function handleAction(button) {
     const selectedMonth = month;
     confirmChange('Xóa hạn mức?',`Hạn mức ${esc(id)} trong tháng ${monthText(month)} sẽ được xóa. Các giao dịch vẫn còn trong sổ.`,() => ({...state,budgets:state.budgets.filter(r => r.month !== selectedMonth || r.category !== id)}),'Xóa hạn mức',true);
   }
+  if (action === 'copy-budgets') {
+    const selectedMonth = month;
+    let previous;
+    try { previous = Wallet.validMonth(selectedMonth) && selectedMonth > '2000-01' ? new Date(Number(selectedMonth.slice(0,4)), Number(selectedMonth.slice(5)) - 2, 1) : null; } catch { previous = null; }
+    if (!previous) return toast('Không có tháng trước để sao chép.');
+    const fromMonth = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2,'0');
+    const result = Wallet.copyBudgets(state, fromMonth, selectedMonth);
+    if (!result.added.length) return toast(`Tháng ${monthText(fromMonth)} không có hạn mức nào còn thiếu ở tháng này.`);
+    confirmChange('Sao chép ngân sách?',`Thêm ${result.added.length} hạn mức từ tháng ${monthText(fromMonth)}: ${result.added.map(r => esc(r.category) + ' ' + money(r.cap)).join(', ')}. Hạn mức đã đặt cho tháng ${monthText(selectedMonth)} được giữ nguyên.`,() => result.state,'Sao chép hạn mức');
+  }
+  if (action === 'change-password') passwordDialog();
+  if (action === 'delete-account') deleteAccountDialog();
   if (action === 'edit-goal') goalDialog(state.goals.find(r => r.id === id));
   if (action === 'contribute') contributeDialog(id);
   if (action === 'delete-goal') confirmChange('Xóa mục tiêu?', 'Chỉ xóa kế hoạch theo dõi. Các giao dịch không thay đổi.',() => ({...state,goals:state.goals.filter(r => r.id !== id)}),'Xóa mục tiêu',true);
@@ -419,8 +477,9 @@ async function handleAction(button) {
   if (action === 'generate-recurring') {
     const selectedMonth = month;
     const result = Wallet.applyRecurring(state,selectedMonth);
-    if (!result.added.length) return toast('Không có giao dịch mới: các lịch đã được ghi nhận, chưa đến kỳ hoặc đang tạm dừng.');
-    confirmChange('Ghi nhận giao dịch định kỳ?',`Sẽ tạo ${result.added.length} giao dịch cho tháng ${monthText(selectedMonth)}. Đây là ghi sổ, không phải thanh toán. Xác nhận sau khi kiểm tra giao dịch thực tế.`,() => Wallet.applyRecurring(state,selectedMonth).state,'Ghi nhận giao dịch');
+    const skippedNote = result.skipped.length ? ` Bỏ qua ${result.skipped.length} lịch vì tháng này đã có giao dịch cùng loại, danh mục và số tiền.` : '';
+    if (!result.added.length) return toast('Không có giao dịch mới: các lịch đã được ghi nhận, chưa đến kỳ hoặc đang tạm dừng.' + skippedNote);
+    confirmChange('Ghi nhận giao dịch định kỳ?',`Sẽ tạo ${result.added.length} giao dịch cho tháng ${monthText(selectedMonth)}: ${result.added.map(r => esc(r.note || r.category) + ' ' + money(r.amount)).join(', ')}.${skippedNote} Đây là ghi sổ, không phải thanh toán.`,() => Wallet.applyRecurring(state,selectedMonth).state,'Ghi nhận giao dịch');
   }
   if (action === 'next' || action === 'previous') { tablePage += action === 'next' ? 1 : -1; renderTable(); }
   if (action === 'csv') download('vi-nho-giao-dich-' + month + '.csv','\ufeff' + Wallet.toCSV(filteredRows()),'text/csv;charset=utf-8');

@@ -51,7 +51,7 @@ Chưa có tập dữ liệu hợp pháp, đủ lớn, baseline và thước đo 
 
 ### 5. Dự báo được tính thế nào?
 
-Với tháng hiện tại, hệ thống lấy chi đã ghi đến hôm nay, chia số ngày đã trôi qua rồi nhân số ngày trong tháng. Tháng cũ dùng thực tế; tháng tương lai không dự báo; chưa có chi thì trả “chưa đủ dữ liệu”. Kết quả không phải cam kết hay tư vấn đầu tư.
+Với tháng hiện tại, khoản cố định khớp lịch định kỳ (tiền phòng…) được cộng nguyên; chỉ chi linh hoạt được ngoại suy theo số ngày đã qua, rồi lấy trung bình với mức chi linh hoạt của tối đa 3 tháng trước. Nhờ vậy tiền phòng trả đầu tháng không bị nhân lên. Tháng cũ dùng thực tế; tháng tương lai không dự báo; chưa có chi thì trả “chưa đủ dữ liệu”. Kết quả không phải cam kết hay tư vấn đầu tư.
 
 ### 6. Tại sao dùng SQLite?
 

@@ -308,5 +308,60 @@ test('HTTP API bảo vệ tài khoản, tách dữ liệu và lưu bền vững'
     assert.equal(login.response.status, 200);
     assert.equal(login.data.revision, savedRevision);
     assert.ok(login.data.state.transactions.some(row => row.id === 'owned-by-a' && row.amount === 123456));
+    cookieA = login.cookie;
+  });
+
+  await t.test('đổi mật khẩu đăng xuất phiên khác, xóa tài khoản xóa toàn bộ dữ liệu', async () => {
+    const other = await request(base, '/api/login', {method: 'POST', json: {email: accountA.email, password: accountA.password}});
+    const wrong = await request(base, '/api/password', {method: 'POST', cookie: cookieA,
+      json: {currentPassword: 'not the password', newPassword: 'brand new password 1'}});
+    assert.equal(wrong.response.status, 401);
+    const changed = await request(base, '/api/password', {method: 'POST', cookie: cookieA,
+      json: {currentPassword: accountA.password, newPassword: 'brand new password 1'}});
+    assert.equal(changed.response.status, 200);
+    assert.equal((await request(base, '/api/state', {cookie: other.cookie})).response.status, 401);
+    assert.equal((await request(base, '/api/state', {cookie: cookieA})).response.status, 200);
+    const audit = await request(base, '/api/audit', {cookie: cookieA});
+    assert.ok(audit.data.events.some(event => event.action === 'password_change'));
+
+    const refused = await request(base, '/api/account/delete', {method: 'POST', cookie: cookieA, json: {password: accountA.password}});
+    assert.equal(refused.response.status, 401);
+    const deleted = await request(base, '/api/account/delete', {method: 'POST', cookie: cookieA, json: {password: 'brand new password 1'}});
+    assert.equal(deleted.response.status, 200);
+    assert.match(deleted.response.headers.get('set-cookie'), /Max-Age=0/i);
+    assert.equal((await request(base, '/api/state', {cookie: cookieA})).response.status, 401);
+    const relogin = await request(base, '/api/login', {method: 'POST', json: {email: accountA.email, password: 'brand new password 1'}});
+    assert.equal(relogin.response.status, 401);
+    for (const table of ['transactions', 'wallet_meta', 'audit', 'sessions']) {
+      const count = server.database.prepare(`SELECT COUNT(*) AS n FROM "${table}" WHERE user_id = ?`).get(initialA.user.id).n;
+      assert.equal(count, 0, table);
+    }
+  });
+
+  await t.test('sổ demo tự dọn sau 24 giờ và tên miền triển khai cấu hình được', async () => {
+    let clock = Date.parse('2026-11-12T00:00:00Z');
+    const demoServer = createApp({dbPath: path.join(directory, 'demo.sqlite'), authRateLimit: 100, now: () => clock,
+      allowedHosts: ['vinho.example.com']});
+    const demoBase = await listen(demoServer);
+    try {
+      const first = await request(demoBase, '/api/demo', {method: 'POST', json: {}});
+      assert.equal(first.response.status, 201);
+      clock += 25 * 60 * 60 * 1000;
+      const second = await request(demoBase, '/api/demo', {method: 'POST', json: {}});
+      assert.equal(second.response.status, 201);
+      const users = demoServer.database.prepare('SELECT id FROM users').all().map(row => row.id);
+      assert.deepEqual(users, [second.data.user.id]);
+      assert.equal((await request(demoBase, '/api/session', {cookie: first.cookie})).data.user, null);
+      const demoDelete = await request(demoBase, '/api/account/delete', {method: 'POST', cookie: second.cookie, json: {}});
+      assert.equal(demoDelete.response.status, 200);
+
+      const port = new URL(demoBase).port;
+      const allowed = await rawRequest(demoBase, '/health', {Host: 'vinho.example.com:' + port});
+      assert.equal(allowed.status, 200);
+      const blocked = await rawRequest(base, '/health', {Host: 'vinho.example.com'});
+      assert.equal(blocked.status, 403);
+    } finally {
+      await close(demoServer);
+    }
   });
 });

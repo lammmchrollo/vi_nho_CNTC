@@ -183,6 +183,14 @@ progress.over::-moz-progress-bar { background: #b96d52; }
 .forecast-box small { display: block; color: var(--muted); font-size: 10px; }
 .forecast-box strong { font-size: 20px; font-weight: 650; letter-spacing: -.6px; }
 .forecast-box p { font-size: 10px; color: var(--muted); max-width: 320px; margin: 0; }
+.safe-strip { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 16px 20px; margin: -9px 0 23px; border: 1px solid #dbe7cf; border-radius: var(--radius); background: #f2f8ea; }
+.safe-strip.warning { border-color: #eedfc0; background: #faf5e9; }
+.safe-main small { display: block; color: var(--muted); font-size: 10px; letter-spacing: .6px; }
+.safe-main strong { font-size: 24px; font-weight: 700; letter-spacing: -.8px; color: var(--deep); }
+.safe-strip.warning .safe-main strong { color: #99753b; }
+.safe-main strong span { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 3px; letter-spacing: 0; }
+.safe-strip p { flex: 1 1 320px; margin: 0; font-size: 11px; color: var(--muted); line-height: 1.55; }
+.quick-field { margin-bottom: 14px; padding: 12px; border: 1px dashed #cfdcc3; border-radius: 10px; background: #f7faf2; }
 .report-list { display: grid; gap: 16px; }
 .report-share { font-size: 11px; margin-bottom: 7px; }
 .report-share span { color: var(--muted); }

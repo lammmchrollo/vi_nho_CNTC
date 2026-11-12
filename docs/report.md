@@ -13,7 +13,7 @@
 
 > Bản báo cáo này mô tả đúng phạm vi prototype trong mã nguồn. Các chân dung người dùng, quy mô thị trường và số liệu kinh doanh đều được ghi rõ là giả thuyết cần kiểm chứng; không được trình bày như kết quả khảo sát hay doanh thu thực tế.
 
-**Phiên bản tài liệu:** 1.0 — 12/11/2026  
+**Phiên bản tài liệu:** 1.1 — 12/11/2026 (cập nhật theo bản phần mềm 2.1)  
 **Tên sản phẩm:** Ví Nhỏ  
 **Chủ đề:** Hệ thống quản lý tài chính cá nhân
 
@@ -23,7 +23,7 @@
 
 Ví Nhỏ là ứng dụng web quản lý tài chính cá nhân bằng tiếng Việt, hướng tới sinh viên và người mới đi làm. Bài toán trung tâm không phải là “thiếu một ứng dụng ghi chép”, mà là khoảng cách giữa dữ liệu giao dịch rời rạc và một quyết định tài chính có thể thực hiện ngay: tháng này đã chi bao nhiêu, khoản nào đang vượt hạn mức, mục tiêu tiết kiệm còn thiếu bao nhiêu, và nếu giữ nhịp chi hiện tại thì cuối tháng có thể ra sao.
 
-Prototype hiện thực hóa một vòng lặp ngắn: **ghi nhận → tổng hợp → so sánh với kế hoạch → cảnh báo → điều chỉnh**. Người dùng có thể đăng ký hoặc đăng nhập, quản lý thu/chi, ngân sách theo danh mục, mục tiêu tiết kiệm và giao dịch định kỳ; xem báo cáo sáu tháng; tạo dự báo dựa trên quy tắc; xuất CSV, sao lưu/khôi phục JSON; và nhập dữ liệu từ phiên bản localStorage cũ. Chế độ demo tạo bộ dữ liệu riêng, giúp giảng viên xem ngay chức năng mà không làm lẫn dữ liệu giữa các tài khoản.
+Prototype hiện thực hóa một vòng lặp ngắn: **ghi nhận → tổng hợp → so sánh với kế hoạch → cảnh báo → điều chỉnh**. Người dùng có thể đăng ký hoặc đăng nhập, quản lý thu/chi, ngân sách theo danh mục, mục tiêu tiết kiệm và giao dịch định kỳ; xem báo cáo sáu tháng; tạo dự báo dựa trên quy tắc có tách khoản cố định; biết hôm nay còn được chi bao nhiêu; nhận cảnh báo khi một danh mục chi cao bất thường; nhập nhanh kiểu “ăn trưa 35k”; xuất CSV, sao lưu/khôi phục JSON; và nhập dữ liệu từ phiên bản localStorage cũ. Chế độ demo tạo bộ dữ liệu riêng, giúp giảng viên xem ngay chức năng mà không làm lẫn dữ liệu giữa các tài khoản.
 
 Giải pháp dùng Node.js 22.15+, HTTP server tích hợp và SQLite thông qua node:sqlite, không phụ thuộc package runtime bên ngoài. Mật khẩu được dẫn xuất bằng scrypt; phiên đăng nhập dùng token ngẫu nhiên trong cookie HttpOnly, SameSite=Strict; mọi bản ghi nghiệp vụ gắn với user_id. API trạng thái dùng revision để phát hiện cập nhật chồng lấn và trả 409 thay vì âm thầm ghi đè. Tiền được lưu dưới dạng số nguyên VND, tránh sai số dấu phẩy động.
 
@@ -148,14 +148,17 @@ Prototype thành công khi người dùng có thể hoàn tất vòng lặp: t�
 | Ngân sách | Hạn mức theo tháng/danh mục | Kiểm soát chi trước khi quá muộn |
 | Mục tiêu | Số đích, số đã tích lũy, hạn | Biến ý định tiết kiệm thành tiến độ |
 | Định kỳ | Mẫu và tạo giao dịch theo tháng, idempotent | Giảm quên và tránh trùng |
-| Phân tích | Báo cáo 6 tháng, cơ cấu, dự báo quy tắc | Nhận biết xu hướng, không dùng hộp đen |
-| Quyền dữ liệu | CSV, backup/restore JSON, nhập v1 | Khả chuyển và khả phục hồi |
+| Phân tích | Báo cáo 6 tháng, cơ cấu, dự báo tách khoản cố định/linh hoạt | Nhận biết xu hướng, không dùng hộp đen |
+| Hạn mức chi mỗi ngày | Thu − chi − khoản cố định sắp tới − phần dành cho mục tiêu, chia số ngày còn lại | Trả lời “hôm nay tiêu được bao nhiêu?” |
+| Cảnh báo bất thường | So chi từng danh mục với trung bình 3 tháng trước | Phát hiện thói quen lệch sớm |
+| Nhập nhanh | Hiểu “ăn trưa 35k”, “grab 50k hôm qua”, “+3tr lương” | Giảm ma sát ghi chép |
+| Quyền dữ liệu | CSV, backup/restore JSON, nhập v1, đổi mật khẩu, xóa tài khoản | Khả chuyển, khả phục hồi, quyền yêu cầu xóa |
 
 ## 3.3 Luồng sử dụng chính
 
 1. Người dùng đăng ký hoặc vào demo. Mỗi phiên nhận một cookie không cho JavaScript đọc.
 2. Ứng dụng tải trạng thái của đúng tài khoản và revision hiện tại.
-3. Người dùng ghi khoản thu/chi; dashboard tính lại tổng, ròng và tiết kiệm.
+3. Người dùng ghi khoản thu/chi (có thể gõ nhanh như ghi chú); dashboard tính lại tổng, ròng, tiết kiệm và hạn mức chi mỗi ngày.
 4. Người dùng đặt ngân sách và mục tiêu; hệ thống so sánh thực tế với kế hoạch.
 5. Khi cần, người dùng yêu cầu sinh giao dịch định kỳ cho tháng được chọn. Cùng một mẫu và tháng không tạo lần hai.
 6. Người dùng xem báo cáo sáu tháng và dự báo; mọi kết quả kèm giải thích quy tắc.
@@ -173,6 +176,21 @@ Prototype thành công khi người dùng có thể hoàn tất vòng lặp: t�
 ## 3.5 Điểm khác biệt trong phạm vi bài tập
 
 Ví Nhỏ không cạnh tranh bằng số lượng tích hợp. Điểm khác biệt của prototype là một lát cắt đầy đủ từ mô hình tài chính đến persistence, xác thực và phục hồi dữ liệu; có thể chạy không cần cloud; UI tiếng Việt/VND; và có ranh giới pháp lý rõ giữa sổ tài chính với dịch vụ thanh toán.
+
+Ở cấp sản phẩm, Ví Nhỏ tập trung vào ba câu hỏi mà một sinh viên cần trả lời mỗi ngày: (1) **hôm nay còn tiêu được bao nhiêu** sau khi đã chừa tiền phòng, khoản cố định và tiết kiệm; (2) **cuối tháng sẽ ra sao** với dự báo tách khoản cố định khỏi chi linh hoạt; (3) **danh mục nào đang lệch thói quen** so với các tháng trước. Mỗi con số đều hiển thị công thức để người dùng tự kiểm tra.
+
+## 3.6 So sánh với giải pháp hiện có
+
+Bảng dưới là đánh giá sơ bộ của nhóm theo nhóm giải pháp, dựa trên trải nghiệm công khai; cần kiểm chứng lại tính năng cụ thể của từng ứng dụng tại thời điểm nộp và không dùng làm khẳng định về sản phẩm của bên thứ ba.
+
+| Nhóm giải pháp | Điểm mạnh | Khoảng trống Ví Nhỏ nhắm tới |
+|---|---|---|
+| Ứng dụng sổ thu chi phổ biến (ví dụ Money Lover, MISA MoneyKeeper, Sổ Thu Chi) | Nhiều tính năng, nhiều ví, có ứng dụng di động | Con số “có thể chi hôm nay” và dự báo có công thức minh bạch; nhập nhanh kiểu ghi chú tiếng Việt; tập trung bối cảnh sinh viên |
+| App ngân hàng số có phân tích chi tiêu | Dữ liệu tự động từ tài khoản | Chỉ thấy giao dịch của một ngân hàng; tiền mặt, ví điện tử và tiền gia đình gửi bị thiếu; không gắn với mục tiêu cá nhân |
+| Excel/Google Sheets | Linh hoạt tuyệt đối | Phải tự xây công thức; không cảnh báo, không chống ghi trùng, khó dùng trên điện thoại |
+| Ghi chú điện thoại | Nhanh, quen tay | Không tổng hợp, không ngân sách, không dự báo |
+
+Định vị: **công cụ ra quyết định chi tiêu hằng ngày cho sinh viên**, không phải sổ cái đầy đủ tính năng. Khác biệt cần được chứng minh bằng usability test ở mục 9.5 trước khi dùng làm luận điểm thương mại.
 
 <!-- PAGE -->
 
@@ -212,7 +230,9 @@ flowchart LR
 - **Tỷ lệ tiết kiệm:** dùng phần ròng so với thu; trường hợp thu bằng 0 phải hiển thị trạng thái có nghĩa, không chia cho 0.
 - **Ngân sách:** mức sử dụng bằng chi danh mục / hạn mức; cảnh báo từ 80%, vượt khi lớn hơn 100%.
 - **Mục tiêu:** tiến độ bằng số tích lũy / số mục tiêu, chặn giá trị âm hoặc vượt miền cho phép.
-- **Dự báo quy tắc:** với tháng hiện tại, ngoại suy chi đã ghi đến hôm nay theo số ngày đã trôi qua; nếu chưa có chi thì trả “chưa đủ dữ liệu”, không tạo số 0 gây hiểu nhầm.
+- **Dự báo quy tắc:** khoản cố định (gắn với lịch định kỳ như tiền phòng) được cộng nguyên, kể cả khoản sắp đến hạn; chỉ phần chi linh hoạt được ngoại suy theo số ngày đã qua, rồi lấy trung bình với mức chi linh hoạt trung bình của tối đa 3 tháng trước. Nếu chưa có chi thì trả “chưa đủ dữ liệu”, không tạo số 0 gây hiểu nhầm.
+- **Hạn mức chi mỗi ngày:** (thu đã ghi + thu định kỳ chưa ghi − chi đã ghi − chi cố định chưa ghi − số cần dành cho mục tiêu trong tháng) ÷ số ngày còn lại, làm tròn xuống nghìn đồng.
+- **Cảnh báo bất thường:** danh mục có chi tháng này lớn hơn 130% trung bình các tháng trước và chênh ít nhất 100.000 ₫.
 
 ## 4.4 Các lựa chọn không dùng
 
@@ -275,8 +295,6 @@ flowchart LR
 Client không được giả định mình là cửa sổ duy nhất. Ví dụ hai tab cùng đọc revision 12. Tab A lưu và nhận revision 13; tab B gửi bản sửa dựa trên 12. Server trả 409, tab B phải tải lại và cho người dùng thực hiện lại quyết định trên dữ liệu mới. Cách này ưu tiên không mất cập nhật hơn sự tiện lợi “last write wins”.
 
 <!-- PAGE -->
-
-# 5. System Design — dữ liệu và API
 
 ## 5.5 Mô hình quan hệ
 
@@ -346,14 +364,12 @@ API trạng thái nguyên khối là thỏa hiệp phù hợp prototype: client 
 
 ## 6.1 Cấu trúc thực thi
 
-- server.js: HTTP server, static files, API, cookie và security headers.
-- database.js: schema/migration, prepared statements, transaction và ownership.
-- model.js: quy tắc thuần cho validation, tổng hợp, ngân sách, mục tiêu, dự báo.
+- server.js: HTTP server, static files, API, cookie, security headers, schema SQLite, prepared statements, transaction và ownership.
+- model.js: quy tắc thuần cho validation, tổng hợp, ngân sách, mục tiêu, dự báo, hạn mức chi mỗi ngày, cảnh báo bất thường và bộ đọc nhập nhanh.
 - app.js: trạng thái UI, gọi API, form/dialog, render dashboard và import/export.
 - index.html và style.css: cấu trúc semantic, responsive, trạng thái focus.
 - Các tệp test: unit cho model và integration cho auth/API/isolation/persistence.
 
-Tên tệp có thể được tổ chức khác trong repository; danh sách trên diễn giải trách nhiệm kiến trúc, không phải cam kết framework.
 
 ## 6.2 Luồng xác thực
 
@@ -363,11 +379,11 @@ Khi đăng ký, server chuẩn hóa email, kiểm tra password theo chính sách
 
 Dashboard lọc giao dịch theo tháng rồi tính income, expense, net = income − expense. Tỷ lệ tiết kiệm được trình bày cùng điều kiện biên. Ngân sách tổng hợp chi theo danh mục; trạng thái normal/near/over dựa trên ngưỡng. Báo cáo sáu tháng dùng cùng hàm tổng hợp để tránh mỗi màn hình có một định nghĩa khác nhau.
 
-Dự báo là rule-based. Với tháng đang diễn ra, hệ thống lấy chi đã ghi đến ngày hiện tại, chia số ngày đã trôi qua và nhân số ngày của tháng. Tháng quá khứ hiển thị thực tế; tháng tương lai không tạo dự báo. Nếu tháng hiện tại chưa có khoản chi, UI trả “chưa đủ dữ liệu” thay vì 0. Kết quả là ước lượng, không phải lời khuyên tài chính; dữ liệu ít hoặc đầu tháng có độ tin cậy thấp.
+Dự báo là rule-based. Phiên bản đầu ngoại suy toàn bộ chi theo số ngày, nên một khoản tiền phòng trả đầu tháng bị nhân lên nhiều lần (dữ liệu mẫu ngày 12 cho ra 10,05 triệu, cao hơn thu nhập). Bản hiện tại tách khoản cố định — giao dịch khớp với lịch định kỳ — và cộng nguyên chúng; phần chi linh hoạt được ngoại suy rồi lấy trung bình với mức trung bình của các tháng trước (cùng dữ liệu mẫu cho ra khoảng 6,6 triệu). Tháng quá khứ hiển thị thực tế; tháng tương lai không tạo dự báo. Nếu tháng hiện tại chưa có khoản chi, UI trả “chưa đủ dữ liệu” thay vì 0. Kết quả là ước lượng, không phải lời khuyên tài chính; dữ liệu ít hoặc đầu tháng có độ tin cậy thấp.
 
 ## 6.4 Định kỳ idempotent
 
-Người dùng chọn tháng và bấm tạo. Model tạo ID xác định rec-{ruleId}-{month}; validation chặn ID giao dịch trùng và khóa chính (user_id, id) bảo vệ thêm ở SQLite. Bấm lại không tạo bản sao. Không có cron âm thầm chạy trong prototype, nhờ đó demo tái lập và người dùng kiểm soát thời điểm ghi sổ.
+Người dùng chọn tháng và bấm tạo. Model tạo ID xác định rec-{ruleId}-{month}; validation chặn ID giao dịch trùng và khóa chính (user_id, id) bảo vệ thêm ở SQLite. Bấm lại không tạo bản sao. Ngoài ra, nếu tháng đó người dùng đã tự nhập một giao dịch cùng loại, danh mục và số tiền với lịch (ví dụ tự ghi tiền phòng), lịch được coi là đã ghi nhận và bị bỏ qua kèm thông báo, tránh tính tiền phòng hai lần. Không có cron âm thầm chạy trong prototype, nhờ đó demo tái lập và người dùng kiểm soát thời điểm ghi sổ.
 
 ## 6.5 Khả chuyển và phục hồi
 
@@ -380,49 +396,14 @@ Người dùng chọn tháng và bấm tạo. Model tạo ID xác định rec-{r
 
 Đăng nhập demo → xem dashboard → thêm một khoản thu và một khoản chi làm ngân sách vượt ngưỡng → tạo mục tiêu → sinh định kỳ hai lần để chứng minh không trùng → xem báo cáo sáu tháng/dự báo → export JSON. Kịch bản chi tiết nằm ở docs/defense-kit.md.
 
-<!-- PAGE -->
+## 6.7 Bổ sung trong phiên bản 2.1
 
-# 9. Evaluation / Discussion
-
-## 9.1 Ma trận tiêu chí chấp nhận
-
-| ID | Tiêu chí quan sát được | Trạng thái tài liệu |
-|---|---|---|
-| A01 | Đăng ký tạo ví v2 rỗng, login sai bị từ chối, logout hủy phiên | Đã có API test |
-| A02 | Hai tài khoản và hai phiên demo có ví riêng | Đã có API isolation test |
-| A03 | CRUD income và expense, reload vẫn còn | Có thể demo |
-| A04 | Tổng thu/chi/ròng đúng với dữ liệu gốc | Đã có unit test + demo |
-| A05 | Ngân sách cảnh báo từ 80%, vượt trên 100% | Đã có unit test + demo |
-| A06 | Mục tiêu hiển thị tiến độ và điều kiện biên | Đã có unit test + demo |
-| A07 | Sinh định kỳ hai lần không tạo trùng | Đã có unit test + demo |
-| A08 | Báo cáo chứa đúng sáu tháng, kể cả biên năm 2000 | Đã có unit test + demo |
-| A09 | Dự báo ghi rõ quy tắc, không gắn nhãn ML | Review UI |
-| A10 | Revision cũ nhận 409, không ghi đè | Đã có API test |
-| A11 | State sai bị từ chối; body trên 2 MiB bị chặn | Đã có API test; restore cần manual smoke |
-| A12 | CSV vô hiệu hóa công thức; backup không có hash/token | Unit test + review |
-| A13 | Legacy v1 nhập được và không tự xóa nguồn | Đã có unit test + demo |
-| A14 | SQLite giữ dữ liệu sau restart | Đã có API persistence test |
-| A15 | Luồng bàn phím, focus, mobile dùng được | Manual/browser QA |
-
-## 9.2 Bằng chứng kiểm thử
-
-Lệnh chuẩn là npm test. Kết quả đóng gói: **{{TEST_SUMMARY}}**. Không điền số test dự kiến vào báo cáo; chỉ cập nhật từ output cuối cùng và giữ log/chụp màn hình trong hồ sơ nộp. Ngoài automated test, cần manual smoke test trên Chrome/Edge ở desktop và viewport mobile.
-
-## 9.3 Đánh giá theo chất lượng
-
-**Correctness:** các phép tính tài chính tập trung trong model thuần, thuận lợi kiểm thử. **Integrity:** transaction, constraint và revision giảm dữ liệu dở dang/mất cập nhật. **Privacy:** sở hữu theo user và export có chủ đích. **Portability:** runtime tối thiểu, không package runtime ngoài; đổi lại phụ thuộc node:sqlite experimental. **Usability:** ngôn ngữ Việt, VND, demo seed; chưa có usability test với người thật. **Scalability:** phù hợp một máy hoặc pilot nhỏ; HTTP server đồng bộ và SQLite một file chưa phải kiến trúc scale ngang.
-
-## 9.4 Hạn chế đánh giá
-
-- Chưa có khảo sát/phỏng vấn nên chưa chứng minh pain point hoặc willingness-to-pay.
-- Dữ liệu mẫu không đại diện hành vi tài chính thật.
-- Chưa có benchmark tải, pen test, accessibility audit độc lập hoặc disaster-recovery drill.
-- Không có kết nối ngân hàng nên phụ thuộc tính đều đặn khi nhập dữ liệu.
-- Dự báo quy tắc chưa có backtest và thước đo MAE/MAPE.
-
-## 9.5 Thiết kế vòng kiểm chứng tiếp theo
-
-Thực hiện 5–8 usability sessions theo nhiệm vụ cố định; đo completion, time-on-task, error và câu hỏi hiểu biết. Chạy pilot opt-in 4 tuần với retention theo tuần và tỷ lệ hoàn thành ghi chép, không thu dữ liệu thừa. Với dự báo, lưu prediction và actual đã ẩn danh/được đồng ý để tính MAE; chỉ cân nhắc ML khi rule baseline không đạt mục tiêu xác định trước.
+- Sửa dự báo cuối tháng: tách khoản cố định, kết hợp lịch sử.
+- Sửa ghi trùng giao dịch định kỳ: dữ liệu mẫu dùng mã rec-…, và lịch khớp giao dịch nhập tay được bỏ qua.
+- Dữ liệu mẫu sát sinh viên hơn: trợ cấp gia đình, lương làm thêm, học bổng; năm tháng lịch sử có biến động thật.
+- “Hôm nay bạn có thể chi” trên Tổng quan; cảnh báo chi tiêu khác thường; sao chép ngân sách từ tháng trước; nhập nhanh kiểu ghi chú.
+- Đổi mật khẩu (đăng xuất các phiên khác) và xóa tài khoản vĩnh viễn; sổ demo tự xóa sau 24 giờ.
+- Cấu hình triển khai: HOST, ALLOWED_HOSTS, TRUST_PROXY cho reverse proxy có TLS.
 
 <!-- PAGE -->
 
@@ -459,8 +440,6 @@ Mức giá chỉ là đầu vào để tính kịch bản, chưa phải quyết 
 North-star không nên là “số giao dịch nhập” đơn thuần. Chỉ số phù hợp hơn là số tuần người dùng hoàn tất review ngân sách và đưa ra ít nhất một điều chỉnh. Guardrails gồm tỷ lệ restore lỗi, sự cố dữ liệu, khiếu nại quyền riêng tư, thời gian xóa/xuất dữ liệu và chênh lệch tính toán. Revenue không được tối ưu bằng dark pattern hoặc bán dữ liệu tài chính.
 
 <!-- PAGE -->
-
-# 7. Business Model — khả thi và kinh tế đơn vị
 
 ## 7.5 Kịch bản chi phí minh họa
 
@@ -540,8 +519,6 @@ Thang likelihood (L) và impact (I) từ 1–5; score = L×I. Điểm là đánh
 
 <!-- PAGE -->
 
-# 8. Security, Risk and Regulation — bối cảnh Việt Nam
-
 ## 8.5 Quyền riêng tư và dữ liệu
 
 Tại ngày truy cập 12/11/2026, Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 có hiệu lực từ 01/01/2026 [R1], và Luật Dữ liệu số 60/2024/QH15 có hiệu lực từ 01/07/2025 [R2]. Nếu Ví Nhỏ vận hành thương mại, đội ngũ phải lập bản đồ dữ liệu, xác định vai trò và mục đích xử lý, thu thập tối thiểu, thiết lập căn cứ xử lý/đồng ý khi áp dụng, cung cấp thông báo minh bạch, hỗ trợ quyền của chủ thể, bảo vệ và xóa/lưu dữ liệu theo chính sách, đồng thời đánh giá nghĩa vụ hồ sơ tác động và chuyển dữ liệu xuyên biên giới theo trường hợp cụ thể. Prototype kỹ thuật không tự chứng minh tuân thủ; cần tư vấn pháp lý trước pilot có dữ liệu thật.
@@ -567,6 +544,55 @@ Dự báo và cảnh báo của Ví Nhỏ là thông tin hỗ trợ lập ngân 
 - Legal sign-off cho tên gọi, marketing và mọi tính năng liên quan thanh toán.
 
 Phần này là phân tích học thuật, không thay thế ý kiến pháp lý chuyên nghiệp.
+
+<!-- PAGE -->
+
+# 9. Evaluation / Discussion
+
+## 9.1 Ma trận tiêu chí chấp nhận
+
+| ID | Tiêu chí quan sát được | Trạng thái tài liệu |
+|---|---|---|
+| A01 | Đăng ký tạo ví v2 rỗng, login sai bị từ chối, logout hủy phiên | Đã có API test |
+| A02 | Hai tài khoản và hai phiên demo có ví riêng | Đã có API isolation test |
+| A03 | CRUD income và expense, reload vẫn còn | Có thể demo |
+| A04 | Tổng thu/chi/ròng đúng với dữ liệu gốc | Đã có unit test + demo |
+| A05 | Ngân sách cảnh báo từ 80%, vượt trên 100% | Đã có unit test + demo |
+| A06 | Mục tiêu hiển thị tiến độ và điều kiện biên | Đã có unit test + demo |
+| A07 | Sinh định kỳ hai lần không tạo trùng | Đã có unit test + demo |
+| A08 | Báo cáo chứa đúng sáu tháng, kể cả biên năm 2000 | Đã có unit test + demo |
+| A09 | Dự báo ghi rõ quy tắc, không gắn nhãn ML | Review UI |
+| A10 | Revision cũ nhận 409, không ghi đè | Đã có API test |
+| A11 | State sai bị từ chối; body trên 2 MiB bị chặn | Đã có API test; restore cần manual smoke |
+| A12 | CSV vô hiệu hóa công thức; backup không có hash/token | Unit test + review |
+| A13 | Legacy v1 nhập được và không tự xóa nguồn | Đã có unit test + demo |
+| A14 | SQLite giữ dữ liệu sau restart | Đã có API persistence test |
+| A15 | Luồng bàn phím, focus, mobile dùng được | Manual/browser QA |
+| A16 | Dự báo không ngoại suy khoản cố định | Đã có unit test + demo |
+| A17 | Lịch định kỳ không ghi trùng giao dịch đã nhập tay | Đã có unit test + demo |
+| A18 | Hạn mức chi mỗi ngày trừ khoản cố định và mục tiêu | Đã có unit test + demo |
+| A19 | Nhập nhanh hiểu 35k, 1tr5, hôm qua, dd/mm | Đã có unit test + demo |
+| A20 | Đổi mật khẩu hủy phiên khác; xóa tài khoản xóa sạch dữ liệu; demo tự dọn | Đã có API test |
+
+## 9.2 Bằng chứng kiểm thử
+
+Lệnh chuẩn là npm test. Kết quả đóng gói: **{{TEST_SUMMARY}}**. Không điền số test dự kiến vào báo cáo; chỉ cập nhật từ output cuối cùng và giữ log/chụp màn hình trong hồ sơ nộp. Ngoài automated test, cần manual smoke test trên Chrome/Edge ở desktop và viewport mobile.
+
+## 9.3 Đánh giá theo chất lượng
+
+**Correctness:** các phép tính tài chính tập trung trong model thuần, thuận lợi kiểm thử. **Integrity:** transaction, constraint và revision giảm dữ liệu dở dang/mất cập nhật. **Privacy:** sở hữu theo user và export có chủ đích. **Portability:** runtime tối thiểu, không package runtime ngoài; đổi lại phụ thuộc node:sqlite experimental. **Usability:** ngôn ngữ Việt, VND, demo seed; chưa có usability test với người thật. **Scalability:** phù hợp một máy hoặc pilot nhỏ; HTTP server đồng bộ và SQLite một file chưa phải kiến trúc scale ngang.
+
+## 9.4 Hạn chế đánh giá
+
+- Chưa có khảo sát/phỏng vấn nên chưa chứng minh pain point hoặc willingness-to-pay.
+- Dữ liệu mẫu không đại diện hành vi tài chính thật.
+- Chưa có benchmark tải, pen test, accessibility audit độc lập hoặc disaster-recovery drill.
+- Không có kết nối ngân hàng nên phụ thuộc tính đều đặn khi nhập dữ liệu.
+- Dự báo quy tắc chưa có backtest và thước đo MAE/MAPE; trọng số 50/50 giữa tốc độ tháng này và lịch sử là lựa chọn thiết kế, chưa được tối ưu.
+
+## 9.5 Thiết kế vòng kiểm chứng tiếp theo
+
+Thực hiện 5–8 usability sessions theo nhiệm vụ cố định; đo completion, time-on-task, error và câu hỏi hiểu biết. Chạy pilot opt-in 4 tuần với retention theo tuần và tỷ lệ hoàn thành ghi chép, không thu dữ liệu thừa. Với dự báo, lưu prediction và actual đã ẩn danh/được đồng ý để tính MAE; chỉ cân nhắc ML khi rule baseline không đạt mục tiêu xác định trước.
 
 <!-- PAGE -->
 

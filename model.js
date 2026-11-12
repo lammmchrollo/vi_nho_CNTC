@@ -184,30 +184,202 @@ const Wallet = (() => {
     return result;
   }
 
-  function forecast(rows, month, today = localDate()) {
+  const ruleActive = (rule, month) => rule && rule.active && month >= rule.startMonth && !(rule.endMonth && month > rule.endMonth);
+
+  // Pairs each active recurring rule with the transaction that already records it in the month:
+  // either the generated row (rec-<rule>-<month>) or a manual row with the same type, category and amount.
+  function matchRecurring(rows, rules, month) {
+    const monthRows = period(rows, month);
+    const claimed = new Set();
+    const matches = [];
+    const list = Array.isArray(rules) ? rules.filter(rule => ruleActive(rule, month)) : [];
+    for (const rule of list) {
+      const generated = monthRows.find(row => row.id === 'rec-' + rule.id + '-' + month);
+      if (generated) { claimed.add(generated.id); matches.push({rule, row: generated}); continue; }
+    }
+    for (const rule of list) {
+      if (matches.some(match => match.rule === rule)) continue;
+      const manual = monthRows.find(row => !claimed.has(row.id) && row.type === rule.type &&
+        row.category === rule.category && row.amount === rule.amount);
+      if (manual) claimed.add(manual.id);
+      matches.push({rule, row: manual || null});
+    }
+    return {matches, fixedIds: claimed};
+  }
+
+  function variableSpent(rows, rules, month) {
+    const {fixedIds} = matchRecurring(rows, rules, month);
+    return totalSpent(period(rows, month).filter(row => !fixedIds.has(row.id)));
+  }
+
+  // Average variable (non-recurring) spending of up to `count` earlier months that contain transactions.
+  function historyAverage(rows, rules, month, count = 3) {
+    const values = [];
+    for (let offset = 1; offset <= 12 && values.length < count; offset++) {
+      let target;
+      try { target = shiftMonth(month, -offset); } catch { break; }
+      if (!period(rows, target).length) continue;
+      values.push(variableSpent(rows, rules, target));
+    }
+    return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+  }
+
+  function forecast(rows, month, today = localDate(), rules = []) {
     if (!Array.isArray(rows)) fail('Danh sách giao dịch không hợp lệ.');
     if (!validMonth(month) || !validDate(today)) fail('Ngày dự báo không hợp lệ.');
     const totalDays = daysInMonth(month);
     const todayMonth = today.slice(0, 7);
+    const base = {fixedExpense: 0, variableExpense: 0, historyAverage: null};
     if (month < todayMonth) {
       const actualExpense = totalSpent(period(rows, month));
-      return {projectedExpense: actualExpense, actualExpense, daysElapsed: totalDays,
+      return {...base, projectedExpense: actualExpense, actualExpense, daysElapsed: totalDays,
         daysInMonth: totalDays, remainingDays: 0, method: 'actual'};
     }
     if (month > todayMonth) {
-      return {projectedExpense: null, actualExpense: 0, daysElapsed: 0,
+      return {...base, projectedExpense: null, actualExpense: 0, daysElapsed: 0,
         daysInMonth: totalDays, remainingDays: totalDays, method: 'unavailable'};
     }
     const daysElapsed = Number(today.slice(8));
     const elapsedRows = period(rows, month).filter(row => row.date <= today);
     const actualExpense = totalSpent(elapsedRows);
     if (!elapsedRows.some(row => row.type === 'out')) {
-      return {projectedExpense: null, actualExpense: 0, daysElapsed,
+      return {...base, projectedExpense: null, actualExpense: 0, daysElapsed,
         daysInMonth: totalDays, remainingDays: totalDays - daysElapsed, method: 'unavailable'};
     }
-    const projectedExpense = Math.round(actualExpense / daysElapsed * totalDays);
-    return {projectedExpense, actualExpense, daysElapsed, daysInMonth: totalDays,
-      remainingDays: totalDays - daysElapsed, method: 'run-rate'};
+    // Fixed costs (rent, subscriptions…) happen once: they are added as-is, never extrapolated.
+    const {matches, fixedIds} = matchRecurring(rows, rules, month);
+    const fixedActual = totalSpent(elapsedRows.filter(row => fixedIds.has(row.id)));
+    const fixedPending = matches.filter(match => match.rule.type === 'out' && (!match.row || match.row.date > today))
+      .reduce((sum, match) => sum + match.rule.amount, 0);
+    const variableActual = actualExpense - fixedActual;
+    const runRate = variableActual / daysElapsed * totalDays;
+    const average = historyAverage(rows, rules, month);
+    const variableProjected = average === null ? Math.round(runRate)
+      : Math.max(variableActual, Math.round((runRate + average) / 2));
+    return {projectedExpense: fixedActual + fixedPending + variableProjected, actualExpense, daysElapsed,
+      daysInMonth: totalDays, remainingDays: totalDays - daysElapsed,
+      method: average === null ? 'run-rate' : 'blended',
+      fixedExpense: fixedActual + fixedPending, variableExpense: variableActual, historyAverage: average};
+  }
+
+  // Money that can still be spent per day this month after planned obligations.
+  function safeToSpend(value, month, today = localDate()) {
+    const state = validateState(value);
+    if (!validMonth(month) || !validDate(today)) fail('Thời điểm tính hạn mức chi không hợp lệ.');
+    if (month !== today.slice(0, 7)) return null;
+    const rows = period(state.transactions, month);
+    const totals = summary(rows);
+    const {matches} = matchRecurring(state.transactions, state.recurring, month);
+    const pending = matches.filter(match => !match.row);
+    const pendingIncome = pending.filter(match => match.rule.type === 'in').reduce((sum, match) => sum + match.rule.amount, 0);
+    const pendingFixed = pending.filter(match => match.rule.type === 'out').reduce((sum, match) => sum + match.rule.amount, 0);
+    const goalReserve = state.goals.filter(goal => goal.saved < goal.target && goal.deadline >= today)
+      .reduce((sum, goal) => sum + goalProgress(goal, today).monthlyNeeded, 0);
+    const available = totals.income + pendingIncome - totals.expense - pendingFixed - goalReserve;
+    const remainingDays = daysInMonth(month) - Number(today.slice(8)) + 1;
+    return {available, perDay: available > 0 ? Math.floor(available / remainingDays / 1000) * 1000 : 0,
+      remainingDays, income: totals.income, expense: totals.expense, pendingIncome, pendingFixed, goalReserve};
+  }
+
+  // Categories whose spending this month is clearly above the average of earlier months.
+  function anomalies(rows, month, count = 3) {
+    if (!Array.isArray(rows) || !validMonth(month)) return [];
+    const previous = [];
+    for (let offset = 1; offset <= 12 && previous.length < count; offset++) {
+      let target;
+      try { target = shiftMonth(month, -offset); } catch { break; }
+      const monthRows = period(rows, target);
+      if (monthRows.length) previous.push(byCategory(monthRows));
+    }
+    if (!previous.length) return [];
+    const current = byCategory(period(rows, month));
+    return expenses.map(category => {
+      const average = Math.round(previous.reduce((sum, totals) => sum + totals[category], 0) / previous.length);
+      return {category, spent: current[category], average,
+        increase: average ? Math.round((current[category] - average) / average * 100) : null};
+    }).filter(row => row.average > 0 && row.spent > row.average * 1.3 && row.spent - row.average >= 100000)
+      .sort((a, b) => (b.spent - b.average) - (a.spent - a.average));
+  }
+
+  function copyBudgets(value, fromMonth, toMonth) {
+    const state = validateState(value);
+    if (!validMonth(fromMonth) || !validMonth(toMonth)) fail('Tháng sao chép ngân sách không hợp lệ.');
+    const existing = new Set(state.budgets.filter(row => row.month === toMonth).map(row => row.category));
+    const added = state.budgets.filter(row => row.month === fromMonth && !existing.has(row.category))
+      .map(row => ({month: toMonth, category: row.category, cap: row.cap}));
+    return {state: validateState({...state, budgets: [...state.budgets, ...added]}), added};
+  }
+
+  const quickKeywords = {
+    in: [
+      ['Học bổng', ['học bổng']],
+      ['Lương', ['lương', 'làm thêm', 'part-time', 'parttime', 'thưởng', 'gia sư']],
+      ['Trợ cấp', ['trợ cấp', 'bố mẹ', 'ba mẹ', 'mẹ gửi', 'bố gửi', 'gia đình gửi', 'nhà gửi']],
+      ['Kinh doanh', ['bán', 'bán hàng', 'doanh thu']],
+      ['Đầu tư', ['lãi', 'cổ tức', 'tiết kiệm lãi']]
+    ],
+    out: [
+      ['Nhà ở', ['tiền phòng', 'tiền nhà', 'thuê nhà', 'điện', 'tiền nước', 'wifi', 'internet', 'gas']],
+      ['Ăn uống', ['ăn', 'uống', 'cơm', 'phở', 'bún', 'bánh', 'cafe', 'cà phê', 'cafê', 'trà sữa', 'chợ', 'đi chợ', 'bữa', 'nước', 'đồ ăn', 'siêu thị']],
+      ['Di chuyển', ['xăng', 'grab', 'be', 'xanh sm', 'taxi', 'bus', 'xe buýt', 'gửi xe', 'vé xe', 'vé tàu', 'sửa xe']],
+      ['Học tập', ['sách', 'giáo trình', 'học phí', 'khóa học', 'photo', 'in tài liệu', 'vở', 'bút']],
+      ['Giải trí', ['phim', 'game', 'karaoke', 'du lịch', 'netflix', 'spotify', 'youtube', 'concert', 'đi chơi']],
+      ['Sức khỏe', ['thuốc', 'khám', 'bệnh viện', 'gym', 'nha khoa', 'bảo hiểm']],
+      ['Mua sắm', ['áo', 'quần', 'giày', 'shopee', 'lazada', 'tiki', 'tiktok shop', 'mỹ phẩm', 'mua']]
+    ]
+  };
+
+  // Parses short Vietnamese notes such as "ăn trưa 35k", "+3tr lương", "grab 50k hôm qua", "sách 120.000 3/11".
+  function parseQuick(text, today = localDate()) {
+    if (typeof text !== 'string' || !validDate(today)) return null;
+    let source = text.trim().slice(0, 200);
+    if (!source) return null;
+    let date = today;
+    const shiftDay = days => {
+      const [year, month, day] = today.split('-').map(Number);
+      return localDate(new Date(year, month - 1, day - days, 12));
+    };
+    const relative = [[/\bhôm kia\b/iu, 2], [/\bhôm qua\b/iu, 1], [/\bhôm nay\b/iu, 0]];
+    for (const [pattern, days] of relative) {
+      if (pattern.test(source)) { const candidate = shiftDay(days); if (validDate(candidate)) date = candidate; source = source.replace(pattern, ' '); break; }
+    }
+    const explicit = source.match(/(?:ngày\s*)?(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/u);
+    if (explicit) {
+      const candidate = (explicit[3] || today.slice(0, 4)) + '-' + pad(explicit[2]) + '-' + pad(explicit[1]);
+      if (validDate(candidate)) date = candidate;
+      source = source.replace(explicit[0], ' ');
+    }
+
+    let amount = null;
+    const amountPattern = /(\d+(?:[.,]\d+)*)\s*(triệu|trieu|tr|m|nghìn|nghin|ngàn|ngan|k|đ|d|vnd)?(\d{1,3})?(?![\p{L}\d])/iu;
+    const match = source.match(amountPattern);
+    if (match) {
+      const unit = (match[2] || '').toLowerCase();
+      const raw = match[1];
+      let number;
+      if (['triệu', 'trieu', 'tr', 'm', 'nghìn', 'nghin', 'ngàn', 'ngan', 'k'].includes(unit)) {
+        number = Number(raw.replace(',', '.'));
+        const scale = ['k', 'nghìn', 'nghin', 'ngàn', 'ngan'].includes(unit) ? 1000 : 1000000;
+        if (match[3] && scale === 1000000) number += Number(match[3]) / 10 ** match[3].length;
+        amount = Math.round(number * scale);
+      } else {
+        amount = Number(raw.replace(/[.,]/g, ''));
+      }
+      source = (source.slice(0, match.index) + ' ' + source.slice(match.index + match[0].length)).trim();
+    }
+    if (!validAmount(amount)) return null;
+
+    let type = 'out';
+    if (/^\s*\+/.test(source)) { type = 'in'; source = source.replace(/^\s*\+/, ''); }
+    const words = ' ' + source.toLocaleLowerCase('vi').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ') + ' ';
+    const find = list => list.find(([, keys]) => keys.some(key => words.includes(' ' + key + ' ')));
+    const incomeHit = find(quickKeywords.in);
+    if (incomeHit && type === 'out' && !find(quickKeywords.out.slice(0, 6))) type = 'in';
+    const hit = type === 'in' ? incomeHit : find(quickKeywords.out);
+    const category = hit ? hit[0] : 'Khác';
+    const cleaned = source.replace(/\s+/g, ' ').trim().slice(0, 100);
+    const note = cleaned ? cleaned[0].toLocaleUpperCase('vi') + cleaned.slice(1) : '';
+    return {type, category, amount, date, note};
   }
 
   function goalProgress(goal, today = localDate()) {
@@ -231,8 +403,14 @@ const Wallet = (() => {
     if (!validMonth(month)) fail('Tháng tạo giao dịch định kỳ không hợp lệ.');
     const known = new Set(state.transactions.map(row => row.id));
     const added = [];
-    for (const rule of state.recurring) {
-      if (!rule.active || month < rule.startMonth || (rule.endMonth && month > rule.endMonth)) continue;
+    const skipped = [];
+    // A rule counts as recorded when its generated row exists or the user already typed the same
+    // type/category/amount manually this month; this prevents double-counting rent or salary.
+    for (const {rule, row: existing} of matchRecurring(state.transactions, state.recurring, month).matches) {
+      if (existing) {
+        if (existing.id !== 'rec-' + rule.id + '-' + month) skipped.push({rule: rule.id, transaction: existing.id});
+        continue;
+      }
       const id = 'rec-' + rule.id + '-' + month;
       if (known.has(id)) continue;
       const date = month + '-' + pad(Math.min(rule.day, daysInMonth(month)));
@@ -241,7 +419,7 @@ const Wallet = (() => {
       known.add(id);
     }
     const next = validateState({...state, transactions: [...state.transactions, ...added]});
-    return {state: next, added};
+    return {state: next, added, skipped};
   }
 
   function csvCell(value) {
@@ -298,10 +476,18 @@ const Wallet = (() => {
       result.push({level: 'info', title: 'Chưa đặt ngân sách', detail: 'Đặt hạn mức theo danh mục để nhận cảnh báo sớm.'});
     }
 
-    const prediction = forecast(state.transactions, month, today);
-    if (prediction.method === 'run-rate') {
+    const prediction = forecast(state.transactions, month, today, state.recurring);
+    if (prediction.method === 'run-rate' || prediction.method === 'blended') {
+      const how = prediction.method === 'blended'
+        ? 'Khoản cố định cộng nguyên; chi linh hoạt lấy trung bình giữa tốc độ tháng này và mức trung bình các tháng trước.'
+        : 'Khoản cố định cộng nguyên; chi linh hoạt ngoại suy theo số ngày đã qua.';
       result.push({level: totals.income && prediction.projectedExpense > totals.income ? 'warning' : 'info',
-        title: 'Ước tính cuối tháng', detail: 'Theo tốc độ hiện tại, chi tiêu ước tính là ' + formatMoney(prediction.projectedExpense) + '. Ngoại suy tuyến tính từ số ngày đã qua.'});
+        title: 'Ước tính cuối tháng', detail: 'Chi tiêu cả tháng ước tính khoảng ' + formatMoney(prediction.projectedExpense) + '. ' + how});
+    }
+    const unusual = anomalies(state.transactions, month).slice(0, 2);
+    if (unusual.length) {
+      result.push({level: 'warning', title: 'Chi tiêu khác thường', detail: unusual.map(row => row.category + ' đã chi ' +
+        formatMoney(row.spent) + ', cao hơn ' + row.increase + '% so với trung bình ' + formatMoney(row.average) + ' của các tháng trước').join('; ') + '.'});
     }
     const overdue = state.goals.filter(goal => goal.saved < goal.target && goal.deadline < today);
     if (overdue.length) result.push({level: 'warning', title: 'Mục tiêu đã quá hạn', detail: overdue.map(goal => goal.name).join(', ') + ' chưa hoàn thành.'});
@@ -316,21 +502,33 @@ const Wallet = (() => {
     const currentDate = targetDay => dated(month, Math.min(targetDay, day));
     const transactions = [];
 
+    // History is varied on purpose so trends, averages and anomaly checks have something to show.
+    const history = {
+      5: {job: 2800000, food: 2350000, travel: 380000, study: 250000, fun: 350000, shopping: 0, health: 0},
+      4: {job: 3200000, food: 2500000, travel: 420000, study: 200000, fun: 500000, shopping: 850000, health: 0},
+      3: {job: 2500000, food: 2650000, travel: 450000, study: 150000, fun: 280000, shopping: 0, health: 250000},
+      2: {job: 3500000, food: 2400000, travel: 400000, study: 180000, fun: 650000, shopping: 320000, health: 0},
+      1: {job: 3000000, food: 2550000, travel: 430000, study: 120000, fun: 420000, shopping: 600000, health: 0}
+    };
     for (let offset = 5; offset >= 1; offset--) {
       let sampleMonth;
       try { sampleMonth = shiftMonth(month, -offset); } catch { continue; }
       const suffix = sampleMonth.replace('-', '');
+      const values = history[offset];
       transactions.push(
-        {id: 'history-salary-' + suffix, date: dated(sampleMonth, 5), type: 'in', category: 'Lương', amount: 7000000, note: 'Lương tháng ' + sampleMonth},
-        {id: 'history-extra-' + suffix, date: dated(sampleMonth, 10), type: 'in', category: 'Trợ cấp', amount: 1000000, note: 'Hỗ trợ sinh hoạt'},
-        {id: 'history-rent-' + suffix, date: dated(sampleMonth, 2), type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng'},
-        {id: 'history-food-' + suffix, date: dated(sampleMonth, 18), type: 'out', category: 'Ăn uống', amount: 1450000 + offset * 20000, note: 'Ăn uống trong tháng'},
-        {id: 'history-travel-' + suffix, date: dated(sampleMonth, 22), type: 'out', category: 'Di chuyển', amount: 320000 - offset * 10000, note: 'Xăng và gửi xe'}
+        {id: 'rec-allowance-' + sampleMonth, date: dated(sampleMonth, 1), type: 'in', category: 'Trợ cấp', amount: 4000000, note: 'Trợ cấp gia đình hàng tháng'},
+        {id: 'rec-rent-' + sampleMonth, date: dated(sampleMonth, 2), type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng hàng tháng'},
+        {id: 'history-job-' + suffix, date: dated(sampleMonth, 10), type: 'in', category: 'Lương', amount: values.job, note: 'Lương làm thêm'},
+        {id: 'history-food-' + suffix, date: dated(sampleMonth, 18), type: 'out', category: 'Ăn uống', amount: values.food, note: 'Ăn uống trong tháng'},
+        {id: 'history-travel-' + suffix, date: dated(sampleMonth, 22), type: 'out', category: 'Di chuyển', amount: values.travel, note: 'Xăng và gửi xe'},
+        {id: 'history-study-' + suffix, date: dated(sampleMonth, 12), type: 'out', category: 'Học tập', amount: values.study, note: 'Tài liệu học tập'},
+        {id: 'history-fun-' + suffix, date: dated(sampleMonth, 20), type: 'out', category: 'Giải trí', amount: values.fun, note: 'Đi chơi cuối tuần'}
       );
+      if (values.shopping) transactions.push({id: 'history-shop-' + suffix, date: dated(sampleMonth, 15), type: 'out', category: 'Mua sắm', amount: values.shopping, note: 'Mua sắm cá nhân'});
+      if (values.health) transactions.push({id: 'history-health-' + suffix, date: dated(sampleMonth, 8), type: 'out', category: 'Sức khỏe', amount: values.health, note: 'Khám và mua thuốc'});
     }
 
     const sample = [
-      [2, 'Nhà ở', 1700000, 'Tiền phòng'],
       [3, 'Ăn uống', 650000, 'Đi chợ đầu tháng'],
       [4, 'Học tập', 320000, 'Giáo trình'],
       [6, 'Di chuyển', 260000, 'Xăng và gửi xe'],
@@ -338,8 +536,11 @@ const Wallet = (() => {
       [8, 'Giải trí', 180000, 'Xem phim'],
       [9, 'Ăn uống', 380000, 'Ăn trưa và đi chợ']
     ];
+    // Current-month rent and allowance use the recurring IDs, so "Ghi nhận định kỳ" never duplicates them.
     transactions.push(
-      {id: 'demo-income-1', date: currentDate(1), type: 'in', category: 'Lương', amount: 7000000, note: 'Lương làm thêm'},
+      {id: 'rec-allowance-' + month, date: currentDate(1), type: 'in', category: 'Trợ cấp', amount: 4000000, note: 'Trợ cấp gia đình hàng tháng'},
+      {id: 'rec-rent-' + month, date: currentDate(2), type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng hàng tháng'},
+      {id: 'demo-income-1', date: currentDate(5), type: 'in', category: 'Lương', amount: 3000000, note: 'Lương làm thêm quán cà phê'},
       {id: 'demo-income-2', date: currentDate(5), type: 'in', category: 'Học bổng', amount: 1500000, note: 'Học bổng học kỳ'}
     );
     sample.forEach(([value, category, amount, note], index) => transactions.push({
@@ -356,11 +557,11 @@ const Wallet = (() => {
     let recurringStart = month;
     try { recurringStart = shiftMonth(month, -5); } catch { /* The earliest valid month is retained. */ }
     const goals = [
-      {id: 'goal-laptop', name: 'Mua laptop mới', target: 20000000, saved: 7500000, deadline: deadline(6, 28)},
-      {id: 'goal-emergency', name: 'Quỹ khẩn cấp', target: 30000000, saved: 12000000, deadline: deadline(12, 28)}
+      {id: 'goal-laptop', name: 'Mua laptop mới', target: 15000000, saved: 6000000, deadline: deadline(6, 28)},
+      {id: 'goal-emergency', name: 'Quỹ khẩn cấp', target: 10000000, saved: 3500000, deadline: deadline(12, 28)}
     ];
     const recurring = [
-      {id: 'salary', type: 'in', category: 'Lương', amount: 7000000, note: 'Lương hàng tháng', day: 5, startMonth: recurringStart, active: true},
+      {id: 'allowance', type: 'in', category: 'Trợ cấp', amount: 4000000, note: 'Trợ cấp gia đình hàng tháng', day: 1, startMonth: recurringStart, active: true},
       {id: 'rent', type: 'out', category: 'Nhà ở', amount: 1700000, note: 'Tiền phòng hàng tháng', day: 2, startMonth: recurringStart, active: true}
     ];
     return validateState({version: 2, demo: true, transactions, budgets, goals, recurring});
@@ -368,7 +569,7 @@ const Wallet = (() => {
 
   return {expenses, income, limit, localDate, validMonth, validDate, validAmount, period, totalSpent,
     byCategory, budgetStatus, seed, validateState, summary, trend, forecast, insights, applyRecurring,
-    toCSV, migrateLegacy, goalProgress};
+    toCSV, migrateLegacy, goalProgress, matchRecurring, safeToSpend, anomalies, copyBudgets, parseQuick};
 })();
 
 if (typeof window === 'object') window.Wallet = Wallet;
